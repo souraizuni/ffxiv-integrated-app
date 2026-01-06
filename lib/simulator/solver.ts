@@ -76,8 +76,14 @@ async function initWasmSolver(): Promise<boolean> {
 
   wasmInitPromise = (async () => {
     try {
-      // 動態載入 WASM 模組（使用相對路徑）
-      const module = await import('../wasm');
+      // 動態載入 WASM 模組
+      // 注意：WASM 模組可能不存在（靜態部署時），這是正常的
+      // @ts-ignore - WASM 模組可能不存在
+      const module = await import(/* webpackIgnore: true */ '../wasm/index.js').catch(() => null);
+      if (!module) {
+        console.info('[Solver] WASM 模組不可用，使用 TypeScript 求解器');
+        return false;
+      }
       const success = await module.initWasm();
       if (success) {
         wasmSolver = module as WasmSolverModule;
@@ -87,7 +93,7 @@ async function initWasmSolver(): Promise<boolean> {
       console.warn('[Solver] WASM 初始化失敗，將使用 TypeScript 備用求解器');
       return false;
     } catch (error) {
-      console.warn('[Solver] WASM 載入失敗:', error);
+      console.info('[Solver] WASM 載入失敗，使用 TypeScript 求解器');
       return false;
     }
   })();
