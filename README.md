@@ -7,8 +7,8 @@
 - **📦 收集追蹤** - 追蹤坐騎、寵物、幻化裝備等收集進度
 - **🔨 生產指引** - 自動拆解材料樹，顯示所有需要的基礎材料
 - **⚙️ 生產模擬器** - 模擬生產過程，測試最佳技能組合
-- **💰 市場價格** - 查詢各伺服器的即時市場價格
-- **📋 製作清單** - 建立並管理製作清單
+- **� 製作清單** - 建立並管理製作清單
+- **🔐 雲端同步** - 使用 Google 登入，資料自動同步至雲端
 
 ## 🚀 快速開始
 
@@ -34,7 +34,7 @@
    ```bash
    cp .env.example .env.local
    ```
-   編輯 `.env.local` 填入您的 Supabase 設定
+   編輯 `.env.local` 填入您的 Firebase 設定
 
 4. **啟動開發伺服器**
    ```bash
@@ -51,28 +51,49 @@
 │   ├── /api               # API Routes
 │   ├── /collection        # 收集追蹤頁面
 │   ├── /crafting          # 生產指引頁面
-│   ├── /market            # 市場價格頁面
+│   ├── /gearsets          # 配裝管理頁面
 │   └── /simulator         # 生產模擬器頁面
 ├── /components            # 共用 UI 組件
 ├── /hooks                 # 自訂 React Hooks
 ├── /lib                   # 核心邏輯層
+│   ├── /firebase          # Firebase/Firestore 連接
 │   ├── /simulator         # 生產模擬計算引擎
 │   ├── /recipe-tree       # 材料樹遞歸拆解
-│   └── /supabase          # 資料庫連接
+│   └── /collection        # 收集追蹤過濾邏輯
 ├── /types                 # TypeScript 類型定義
-└── /supabase              # 資料庫 Schema
+└── /data                  # 靜態資料檔案
 ```
 
-## 🗄️ 資料庫設定
+## 🔥 Firebase 設定
 
-本專案使用 [Supabase](https://supabase.com) 作為後端資料庫。
+本專案使用 [Firebase](https://firebase.google.com) 作為後端服務。
 
 ### 設定步驟
 
-1. 前往 [Supabase](https://supabase.com) 建立免費帳號
-2. 建立新專案
-3. 在 SQL Editor 中執行 `supabase/schema.sql` 建立資料表
-4. 複製專案的 URL 和 anon key 到 `.env.local`
+1. 前往 [Firebase Console](https://console.firebase.google.com) 建立專案
+2. 啟用 **Authentication** 並開啟 Google 登入
+3. 啟用 **Firestore Database**
+4. 在專案設定中取得 Web App 的設定值
+5. 建立 `.env.local` 並填入以下環境變數：
+
+```env
+NEXT_PUBLIC_FIREBASE_API_KEY=your_api_key
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_project.firebasestorage.app
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
+NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=your_measurement_id
+```
+
+### Firestore 資料結構
+
+```
+users/{userId}
+├── gearsets        # 配裝資料
+├── collection      # 收集追蹤資料
+└── settings        # 使用者設定
+```
 
 ## 🌐 外部 API
 
@@ -105,22 +126,22 @@
 
 為維持免費運作，請注意：
 
-- **Supabase**: 免費層 500MB 資料庫空間
+- **Firebase**: 免費 Spark 方案提供充足額度
 - **Vercel**: 免費層每月 100GB 頻寬
 - **XIVAPI**: 公開 API 有頻率限制
 
 ### 最佳實踐
 
 1. 將複雜運算放在客戶端執行
-2. 使用 JSONB 儲存複雜資料減少 Table 數量
+2. 使用 Firestore 儲存使用者資料
 3. 圖片直接引用 XIVAPI 的圖片網址
 
 ## 🛠️ 技術棧
 
-- **框架**: Next.js 14+ (App Router)
+- **框架**: Next.js 16+ (App Router)
 - **語言**: TypeScript
 - **樣式**: Tailwind CSS
-- **資料庫**: Supabase (PostgreSQL)
+- **後端服務**: Firebase (Authentication + Firestore)
 - **狀態管理**: Zustand + SWR
 - **部署**: Vercel
 

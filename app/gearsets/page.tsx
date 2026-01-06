@@ -1,7 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useGearsets, ALL_CRAFT_JOBS, JOB_NAMES, DEFAULT_ATTRIBUTES, GearsetRow } from '@/hooks/use-gearsets';
+import { useAuth } from '@/hooks/use-auth';
+import { useFirestoreGearsets } from '@/hooks/use-firestore';
 import type { CraftJob } from '@/types';
 
 export default function GearsetsPage() {
@@ -19,6 +21,40 @@ export default function GearsetsPage() {
   const [selectedId, setSelectedId] = useState<number>(0);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [importText, setImportText] = useState('');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  // Firebase Auth and Firestore
+  const { user, isLoggedIn, login, logout, isConfigured } = useAuth();
+  const { cloudGearsets, saveToCloud, loadFromCloud, isLoading: isSyncing, lastSynced } = useFirestoreGearsets(user);
+
+  // 當使用者登入時，載入雲端資料
+  useEffect(() => {
+    if (user && cloudGearsets && cloudGearsets.length > 0) {
+      // 可選：詢問是否要合併或覆蓋本地資料
+      const shouldImport = window.confirm('偵測到雲端配裝資料，是否要載入？這將覆蓋本地資料。');
+      if (shouldImport) {
+        importJson(JSON.stringify({ gearsets: cloudGearsets }));
+      }
+    }
+  }, [cloudGearsets, user]);
+
+  // 儲存至雲端
+  const handleSaveToCloud = async () => {
+    if (!isLoggedIn) {
+      await login();
+      return;
+    }
+
+    setSaveStatus('saving');
+    const success = await saveToCloud(gearsets);
+    if (success) {
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } else {
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    }
+  };
 
   const selectedGearset = gearsets.find(g => g.id === selectedId) || gearsets[0];
 
@@ -58,7 +94,47 @@ export default function GearsetsPage() {
     <div className="max-w-6xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-3xl font-bold">配裝管理</h1>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          {/* 雲端同步狀態 */}
+          {isLoggedIn && lastSynced && (
+            <span className="text-xs text-gray-500">
+              上次同步: {new Date(lastSynced).toLocaleTimeString()}
+            </span>
+          )}
+          {/* 雲端儲存按鈕 */}
+          <button
+            onClick={handleSaveToCloud}
+            disabled={isSyncing || saveStatus === 'saving'}
+            className={`px-4 py-2 text-sm rounded-lg flex items-center gap-2 transition-colors ${
+              saveStatus === 'saved' 
+                ? 'bg-green-500 hover:bg-green-600 text-white' 
+                : saveStatus === 'error'
+                ? 'bg-red-500 hover:bg-red-600 text-white'
+                : 'bg-purple-500 hover:bg-purple-600 text-white'
+            } disabled:opacity-50`}
+          >
+            {saveStatus === 'saving' || isSyncing ? (
+              <>
+                <span className="animate-spin">⏳</span> 儲存中...
+              </>
+            ) : saveStatus === 'saved' ? (
+              <>
+                <span>✅</span> 已儲存
+              </>
+            ) : saveStatus === 'error' ? (
+              <>
+                <span>❌</span> 儲存失敗
+              </>
+            ) : isLoggedIn ? (
+              <>
+                <span>☁️</span> 儲存至雲端
+              </>
+            ) : (
+              <>
+                <span>🔐</span> 登入並同步
+              </>
+            )}
+          </button>
           <button
             onClick={handleExport}
             className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded-lg flex items-center gap-2"

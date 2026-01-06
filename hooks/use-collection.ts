@@ -2,122 +2,139 @@
 // 收集追蹤 Hooks
 // ============================================
 
-import { useState, useCallback } from 'react';
-import useSWR from 'swr';
-import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
-import type { CollectedItem, CollectionProgress } from '@/types';
+import { useState, useCallback, useEffect } from 'react';
+import { User } from 'firebase/auth';
+import { saveCollectionData, loadCollectionData } from '@/lib/firebase/firestore';
+import type { CollectionProgress } from '@/types';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseClient = any;
+// ---- 使用 Firestore 的收集項目 Hook ----
+export function useCollectedItems(user: User | null) {
+  const [items, setItems] = useState<number[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
-// ---- 取得使用者收集清單 ----
-export function useCollectedItems(userId: string | null) {
-  const supabase: SupabaseClient = createClient();
+  // 從 Firestore 載入資料
+  useEffect(() => {
+    const loadData = async () => {
+      if (!user) {
+        // 未登入時使用本地儲存
+        const stored = localStorage.getItem('ffxiv-collected-items');
+        setItems(stored ? JSON.parse(stored) : []);
+        setIsLoading(false);
+        return;
+      }
 
-  const fetcher = async () => {
-    if (!userId || !supabase) return [];
-    
-    const { data, error } = await supabase
-      .from('collected_items')
-      .select('*')
-      .eq('user_id', userId);
+      try {
+        setIsLoading(true);
+        const data = await loadCollectionData(user.uid);
+        if (data) {
+          // ownedItems 是 Record<string, number[]>，把所有 collection 合併為單一陣列
+          const merged = Object.values(data.ownedItems || {}).flat();
+          setItems(Array.from(new Set(merged)));
+        }
+      } catch (err) {
+        setError(err as Error);
+        console.error('載入收集資料失敗:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-    if (error) throw error;
-    return data as CollectedItem[];
-  };
+    loadData();
+  }, [user]);
 
-  const { data, error, isLoading, mutate } = useSWR(
-    userId && isSupabaseConfigured() ? `collected-items-${userId}` : null,
-    fetcher,
-    {
-      revalidateOnFocus: false,
+  // 儲存到 Firestore
+  const saveItems = useCallback(async (newItems: number[]) => {
+    if (user) {
+      try {
+        // Firestore expects ownedItems as Record<string, number[]>
+        await saveCollectionData(user.uid, {
+          ownedItems: { All: newItems },
+          wishlist: [],
+        });
+      } catch (err) {
+        console.error('儲存收集資料失敗:', err);
+      }
     }
-  );
+    // 同時儲存到本地作為備份
+    localStorage.setItem('ffxiv-collected-items', JSON.stringify(newItems));
+  }, [user]);
 
   // 新增收集項目
   const addItem = useCallback(
-    async (itemId: number, isHQ: boolean = false, notes?: string) => {
-      if (!userId) return;
-
-      const supabase: SupabaseClient = createClient();
-      if (!supabase) return;
-      
-      const { error } = await supabase.from('collected_items').insert({
-        user_id: userId,
-        item_id: itemId,
-        is_hq: isHQ,
-        notes,
-      });
-
-      if (error) throw error;
-      mutate();
+    async (itemId: number) => {
+      if (items.includes(itemId)) return;
+      const newItems = [...items, itemId];
+      setItems(newItems);
+      await saveItems(newItems);
     },
-    [userId, mutate]
+    [items, saveItems]
   );
 
   // 移除收集項目
   const removeItem = useCallback(
     async (itemId: number) => {
-      if (!userId) return;
-
-      const supabase: SupabaseClient = createClient();
-      if (!supabase) return;
-      
-      const { error } = await supabase
-        .from('collected_items')
-        .delete()
-        .eq('user_id', userId)
-        .eq('item_id', itemId);
-
-      if (error) throw error;
-      mutate();
+      const newItems = items.filter((id) => id !== itemId);
+      setItems(newItems);
+      await saveItems(newItems);
     },
-    [userId, mutate]
+    [items, saveItems]
   );
 
   // 切換收集狀態
   const toggleItem = useCallback(
-    async (itemId: number, isHQ: boolean = false) => {
-      const isCollected = data?.some((item) => item.itemId === itemId);
-      if (isCollected) {
+    async (itemId: number) => {
+      if (items.includes(itemId)) {
         await removeItem(itemId);
       } else {
-        await addItem(itemId, isHQ);
+        await addItem(itemId);
       }
     },
-    [data, addItem, removeItem]
+    [items, addItem, removeItem]
   );
 
   // 檢查是否已收集
   const isCollected = useCallback(
-    (itemId: number) => {
-      return data?.some((item) => item.itemId === itemId) ?? false;
-    },
-    [data]
+    (itemId: number) => items.includes(itemId),
+    [items]
   );
 
+  // 重新載入
+  const refresh = useCallback(async () => {
+    if (!user) return;
+    try {
+      const data = await loadCollectionData(user.uid);
+      if (data) {
+        const merged = Object.values(data.ownedItems || {}).flat();
+        setItems(Array.from(new Set(merged)));
+      }
+    } catch (err) {
+      console.error('重新載入失敗:', err);
+    }
+  }, [user]);
+
   return {
-    items: data || [],
+    items,
     isLoading,
     error,
     addItem,
     removeItem,
     toggleItem,
     isCollected,
-    refresh: mutate,
+    refresh,
   };
 }
 
 // ---- 計算收集進度 ----
 export function useCollectionProgress(
-  userId: string | null,
+  user: User | null,
   categoryId: string,
   totalItemIds: number[]
 ) {
-  const { items, isLoading } = useCollectedItems(userId);
+  const { items, isLoading } = useCollectedItems(user);
 
-  const collectedInCategory = items.filter((item) =>
-    totalItemIds.includes(item.itemId)
+  const collectedInCategory = items.filter((itemId) =>
+    totalItemIds.includes(itemId)
   );
 
   const progress: CollectionProgress = {

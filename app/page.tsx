@@ -42,15 +42,6 @@ export default function HomePage() {
           color="purple"
         />
 
-        {/* 市場查詢 */}
-        <FeatureCard
-          href="/market"
-          icon="💰"
-          title="市場價格"
-          description="查詢市場價格，比較各伺服器的物品售價，找到最佳交易機會。"
-          color="amber"
-        />
-
         {/* 製作清單 */}
         <FeatureCard
           href="/crafting/lists"

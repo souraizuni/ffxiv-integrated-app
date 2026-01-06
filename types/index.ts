@@ -201,48 +201,6 @@ export interface CollectionProgress {
   percentage: number;
 }
 
-// ---- 市場價格相關 (Universalis) ----
-export interface MarketListing {
-  listingId: string;
-  itemId: number;
-  worldId: number;
-  worldName: string;
-  pricePerUnit: number;
-  quantity: number;
-  total: number;
-  isHQ: boolean;
-  retainerName: string;
-  lastReviewTime: number;
-}
-
-export interface MarketHistory {
-  itemId: number;
-  worldId: number;
-  entries: MarketHistoryEntry[];
-}
-
-export interface MarketHistoryEntry {
-  pricePerUnit: number;
-  quantity: number;
-  timestamp: number;
-  isHQ: boolean;
-  buyerName?: string;
-}
-
-export interface MarketData {
-  itemId: number;
-  worldId?: number;
-  dcName?: string;
-  listings: MarketListing[];
-  recentHistory: MarketHistoryEntry[];
-  currentAveragePrice: number;
-  currentAveragePriceNQ: number;
-  currentAveragePriceHQ: number;
-  minPriceNQ: number;
-  minPriceHQ: number;
-  lastUploadTime: number;
-}
-
 // ---- 使用者設定 ----
 export interface UserSettings {
   userId: string;
@@ -268,29 +226,7 @@ export interface PaginatedResponse<T> {
   hasMore: boolean;
 }
 
-// ---- Supabase 資料表類型 ----
-export interface Database {
-  public: {
-    Tables: {
-      collected_items: {
-        Row: CollectedItem;
-        Insert: Omit<CollectedItem, 'id' | 'collectedAt'>;
-        Update: Partial<CollectedItem>;
-      };
-      user_settings: {
-        Row: UserSettings;
-        Insert: UserSettings;
-        Update: Partial<UserSettings>;
-      };
-      crafting_lists: {
-        Row: CraftingList;
-        Insert: Omit<CraftingList, 'id' | 'createdAt' | 'updatedAt'>;
-        Update: Partial<CraftingList>;
-      };
-    };
-  };
-}
-
+// ---- 製作清單類型 ----
 export interface CraftingList {
   id: string;
   userId: string;
@@ -305,4 +241,40 @@ export interface CraftingListItem {
   itemId: number;
   quantity: number;
   isCompleted: boolean;
+}
+
+// ---- 市場資料類型（Universalis） ----
+export interface MarketListing {
+  listingId: string;
+  itemId: number;
+  worldId: number;
+  worldName: string;
+  pricePerUnit: number;
+  quantity: number;
+  total: number;
+  isHQ: boolean;
+  retainerName?: string;
+  lastReviewTime: number;
+}
+
+export interface MarketHistoryEntry {
+  pricePerUnit: number;
+  quantity: number;
+  timestamp: number;
+  isHQ: boolean;
+  buyerName?: string;
+}
+
+export interface MarketData {
+  itemId: number;
+  worldId?: number;
+  dcName?: string;
+  listings: MarketListing[];
+  recentHistory: MarketHistoryEntry[];
+  currentAveragePrice: number;
+  currentAveragePriceNQ: number;
+  currentAveragePriceHQ: number;
+  minPriceNQ: number;
+  minPriceHQ: number;
+  lastUploadTime: number;
 }

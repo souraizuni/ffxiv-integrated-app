@@ -115,7 +115,7 @@ export default function SettingsPage() {
 
           <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
             <p className="text-sm text-gray-500">
-              這些設定會用於市場價格查詢的預設伺服器。
+              這些設定會用於識別您的遊戲角色所在伺服器。
             </p>
           </div>
         </div>
