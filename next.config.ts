@@ -1,23 +1,15 @@
 import type { NextConfig } from "next";
 
-// 判斷是否為 GitHub Pages 部署
-const isGitHubPages = process.env.GITHUB_PAGES === 'true';
-const repoName = 'ffxiv-integrated-app';
-
 const nextConfig: NextConfig = {
-  // GitHub Pages 靜態輸出設定
+  // 靜態輸出設定
   output: 'export',
-  
-  // GitHub Pages 需要 basePath（因為部署在 /repo-name/ 路徑下）
-  basePath: isGitHubPages ? `/${repoName}` : '',
-  assetPrefix: isGitHubPages ? `/${repoName}/` : '',
   
   // 禁用圖片優化（靜態輸出不支援）
   images: {
     unoptimized: true,
   },
   
-  // 生成 trailing slash（GitHub Pages 友善）
+  // 生成 trailing slash
   trailingSlash: true,
 
   // 啟用 WASM 支援 (Webpack)
