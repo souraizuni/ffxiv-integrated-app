@@ -10,7 +10,8 @@ import {
   signInWithGoogle, 
   signOut, 
   onAuthChange, 
-  isFirebaseConfigured 
+  isFirebaseConfigured,
+  handleRedirectResult,
 } from '@/lib/firebase';
 
 export interface AuthState {
@@ -31,6 +32,17 @@ export function useAuth() {
       setState(prev => ({ ...prev, isLoading: false }));
       return;
     }
+
+    // 處理 redirect 登入結果（若使用者從 Google 登入頁面返回）
+    handleRedirectResult().then((user) => {
+      if (user) {
+        setState({
+          user,
+          isLoading: false,
+          isConfigured: true,
+        });
+      }
+    });
 
     const unsubscribe = onAuthChange((user) => {
       setState({
