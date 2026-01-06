@@ -160,7 +160,7 @@ export function useFirestoreSettings(user: User | null) {
     }
   }, [user]);
 
-  const saveToCloud = useCallback(async (settings: Omit<UserSettings, 'updatedAt'>) => {
+  const saveToCloud = useCallback(async (settings: UserSettings) => {
     if (!user || !isFirebaseConfigured()) return false;
 
     setIsLoading(true);
