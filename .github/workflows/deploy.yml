@@ -2,9 +2,9 @@
 name: Deploy to GitHub Pages
 
 on:
-  # 當推送到 master 分支時觸發
+  # 當推送到 main 分支時觸發
   push:
-    branches: ['master']
+    branches: ['main']
   
   # 允許手動觸發
   workflow_dispatch:
