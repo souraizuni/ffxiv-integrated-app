@@ -14,3 +14,7 @@ export {
   InitialQualitySetting,
   SolverSettings,
 } from './solver-options';
+
+// 地圖組件
+export { GameMap } from './game-map';
+export { MapDialog } from './map-dialog';

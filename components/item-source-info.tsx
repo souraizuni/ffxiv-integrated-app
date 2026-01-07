@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import type { ItemSourceInfo, GatheringNodeInfo, VendorInfoDetail, MobDropInfo } from '@/lib/item-sources';
 import { getItemSources } from '@/lib/item-sources';
+import { MapDialog } from './map-dialog';
+import type { MapMarker } from '@/lib/map-service';
 
 interface ItemSourceInfoProps {
   itemId: number;
@@ -15,6 +17,15 @@ export function ItemSourceInfoPanel({ itemId, itemName, onClose }: ItemSourceInf
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'vendors' | 'gathering' | 'drops'>('gathering');
+  
+  // 地圖彈窗狀態
+  const [mapOpen, setMapOpen] = useState(false);
+  const [mapConfig, setMapConfig] = useState<{
+    zoneId?: number;
+    mapId?: number;
+    title: string;
+    markers: MapMarker[];
+  }>({ title: '', markers: [] });
 
   useEffect(() => {
     async function loadSources() {
@@ -63,6 +74,56 @@ export function ItemSourceInfoPanel({ itemId, itemName, onClose }: ItemSourceInf
   const hasGathering = sources.gatheringNodes.length > 0;
   const hasVendors = sources.vendors.length > 0;
   const hasDrops = sources.drops.length > 0;
+
+  // 打開地圖顯示採集點
+  const openGatheringMap = (node: GatheringNodeInfo) => {
+    if (node.mapId > 0 && node.x > 0 && node.y > 0) {
+      setMapConfig({
+        mapId: node.mapId,
+        zoneId: node.zoneId,
+        title: `${node.zoneNameZh} - 採集點`,
+        markers: [{
+          x: node.x,
+          y: node.y,
+          iconType: 'gathering',
+          icon: node.typeIcon,
+          tooltip: `${node.typeNameZh} Lv.${node.level}`,
+        }],
+      });
+      setMapOpen(true);
+    }
+  };
+
+  // 打開地圖顯示商店
+  const openVendorMap = (vendor: VendorInfoDetail) => {
+    if (vendor.mapId > 0 && vendor.x > 0 && vendor.y > 0) {
+      setMapConfig({
+        mapId: vendor.mapId,
+        zoneId: vendor.zoneId,
+        title: `${vendor.zoneNameZh} - ${vendor.nameZh}`,
+        markers: [{
+          x: vendor.x,
+          y: vendor.y,
+          iconType: 'vendor',
+          icon: '🏪',
+          tooltip: vendor.nameZh,
+        }],
+      });
+      setMapOpen(true);
+    }
+  };
+
+  // 打開地圖顯示怪物
+  const openDropMap = (drop: MobDropInfo) => {
+    if (drop.zoneId > 0) {
+      setMapConfig({
+        zoneId: drop.zoneId,
+        title: `${drop.zoneNameZh} - ${drop.name}`,
+        markers: [], // 怪物目前沒有精確座標
+      });
+      setMapOpen(true);
+    }
+  };
 
   if (!hasGathering && !hasVendors && !hasDrops) {
     return (
@@ -121,15 +182,25 @@ export function ItemSourceInfoPanel({ itemId, itemName, onClose }: ItemSourceInf
       {/* 分頁內容 */}
       <div className="max-h-80 overflow-y-auto">
         {activeTab === 'gathering' && hasGathering && (
-          <GatheringNodeList nodes={sources.gatheringNodes} />
+          <GatheringNodeList nodes={sources.gatheringNodes} onShowMap={openGatheringMap} />
         )}
         {activeTab === 'vendors' && hasVendors && (
-          <VendorList vendors={sources.vendors} price={sources.price} />
+          <VendorList vendors={sources.vendors} price={sources.price} onShowMap={openVendorMap} />
         )}
         {activeTab === 'drops' && hasDrops && (
-          <DropList drops={sources.drops} />
+          <DropList drops={sources.drops} onShowMap={openDropMap} />
         )}
       </div>
+
+      {/* 地圖彈窗 */}
+      <MapDialog
+        isOpen={mapOpen}
+        onClose={() => setMapOpen(false)}
+        mapId={mapConfig.mapId}
+        zoneId={mapConfig.zoneId}
+        title={mapConfig.title}
+        markers={mapConfig.markers}
+      />
     </div>
   );
 }
@@ -164,7 +235,13 @@ function TabButton({
 }
 
 // 採集點列表
-function GatheringNodeList({ nodes }: { nodes: GatheringNodeInfo[] }) {
+function GatheringNodeList({ 
+  nodes,
+  onShowMap,
+}: { 
+  nodes: GatheringNodeInfo[];
+  onShowMap?: (node: GatheringNodeInfo) => void;
+}) {
   return (
     <div className="divide-y divide-gray-100 dark:divide-gray-700">
       {nodes.map((node) => (
@@ -201,6 +278,15 @@ function GatheringNodeList({ nodes }: { nodes: GatheringNodeInfo[] }) {
                 <span className="font-mono text-blue-600 dark:text-blue-400">
                   📍 X: {node.x.toFixed(1)}, Y: {node.y.toFixed(1)}
                 </span>
+                {node.mapId > 0 && onShowMap && (
+                  <button
+                    onClick={() => onShowMap(node)}
+                    className="ml-1 px-2 py-0.5 text-xs bg-green-100 hover:bg-green-200 text-green-700 dark:bg-green-900/30 dark:hover:bg-green-900/50 dark:text-green-400 rounded transition-colors"
+                    title="查看地圖"
+                  >
+                    🗺️ 地圖
+                  </button>
+                )}
               </>
             )}
             {node.spawns.length > 0 && (
@@ -217,7 +303,15 @@ function GatheringNodeList({ nodes }: { nodes: GatheringNodeInfo[] }) {
 }
 
 // 商店列表
-function VendorList({ vendors, price }: { vendors: VendorInfoDetail[]; price?: number }) {
+function VendorList({ 
+  vendors, 
+  price,
+  onShowMap,
+}: { 
+  vendors: VendorInfoDetail[]; 
+  price?: number;
+  onShowMap?: (vendor: VendorInfoDetail) => void;
+}) {
   // 只顯示前 15 個商店
   const displayVendors = vendors.slice(0, 15);
   const hasMore = vendors.length > 15;
@@ -255,6 +349,15 @@ function VendorList({ vendors, price }: { vendors: VendorInfoDetail[]; price?: n
                   <span className="font-mono text-blue-600 dark:text-blue-400">
                     X: {vendor.x.toFixed(1)}, Y: {vendor.y.toFixed(1)}
                   </span>
+                  {vendor.mapId > 0 && onShowMap && (
+                    <button
+                      onClick={() => onShowMap(vendor)}
+                      className="ml-1 px-2 py-0.5 text-xs bg-yellow-100 hover:bg-yellow-200 text-yellow-700 dark:bg-yellow-900/30 dark:hover:bg-yellow-900/50 dark:text-yellow-400 rounded transition-colors"
+                      title="查看地圖"
+                    >
+                      🗺️ 地圖
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -271,7 +374,13 @@ function VendorList({ vendors, price }: { vendors: VendorInfoDetail[]; price?: n
 }
 
 // 掉落列表
-function DropList({ drops }: { drops: MobDropInfo[] }) {
+function DropList({ 
+  drops,
+  onShowMap,
+}: { 
+  drops: MobDropInfo[];
+  onShowMap?: (drop: MobDropInfo) => void;
+}) {
   return (
     <div className="divide-y divide-gray-100 dark:divide-gray-700">
       {drops.map((drop) => (
@@ -285,10 +394,19 @@ function DropList({ drops }: { drops: MobDropInfo[] }) {
               Lv.{drop.level}
             </span>
           </div>
-          <div className="mt-1 text-sm text-gray-500">
+          <div className="mt-1 text-sm text-gray-500 flex items-center gap-2">
             <span className="inline-flex items-center gap-1">
               📍 {drop.zoneNameZh}
             </span>
+            {drop.zoneId > 0 && onShowMap && (
+              <button
+                onClick={() => onShowMap(drop)}
+                className="px-2 py-0.5 text-xs bg-red-100 hover:bg-red-200 text-red-700 dark:bg-red-900/30 dark:hover:bg-red-900/50 dark:text-red-400 rounded transition-colors"
+                title="查看區域地圖"
+              >
+                🗺️ 地圖
+              </button>
+            )}
           </div>
         </div>
       ))}
