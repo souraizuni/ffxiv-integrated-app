@@ -200,13 +200,26 @@ export function MaterialCostCalculator({
     let totalCost = 0;
     let totalCostByRequirement = 0; // 按需求量計算的成本（用於比較）
 
+    // 基礎材料成本
     actualRequirements.forEach((requiredQty, itemId) => {
       const entry = costEntries.get(itemId);
-      if (entry) {
+      const material = actualMaterials.find((m) => m.itemId === itemId);
+      if (entry && material?.isBaseMaterial) {
         // 實際成本 = 單價 × 購買數量
         const purchaseQty = entry.purchaseQty || requiredQty;
         totalCost += entry.unitPrice * purchaseQty;
         // 需求成本 = 單價 × 需求量
+        totalCostByRequirement += entry.unitPrice * requiredQty;
+      }
+    });
+
+    // 中間製品成本（選擇購買的）
+    craftableMaterials.forEach((material) => {
+      const entry = costEntries.get(material.itemId);
+      if (entry?.source === 'buy') {
+        const requiredQty = actualRequirements.get(material.itemId) || 0;
+        const purchaseQty = entry.purchaseQty || requiredQty;
+        totalCost += entry.unitPrice * purchaseQty;
         totalCostByRequirement += entry.unitPrice * requiredQty;
       }
     });
@@ -216,29 +229,37 @@ export function MaterialCostCalculator({
     const wastedCost = totalCost - totalCostByRequirement; // 多餘材料成本
 
     return { totalCost, totalOutput, costPerUnit, wastedCost, totalCostByRequirement };
-  }, [actualRequirements, costEntries, multiplier, craftYield]);
+  }, [actualRequirements, costEntries, multiplier, craftYield, actualMaterials, craftableMaterials]);
 
   // 計算成本細分（使用購買數量）
   const costBreakdown = useMemo(() => {
     let baseCost = 0;
     let craftableCost = 0;
 
+    // 基礎材料成本
     actualRequirements.forEach((requiredQty, itemId) => {
       const material = actualMaterials.find((m) => m.itemId === itemId);
       const entry = costEntries.get(itemId);
-      if (material && entry) {
+      if (material && entry && material.isBaseMaterial) {
         const purchaseQty = entry.purchaseQty || requiredQty;
         const cost = entry.unitPrice * purchaseQty;
-        if (material.isBaseMaterial) {
-          baseCost += cost;
-        } else {
-          craftableCost += cost;
-        }
+        baseCost += cost;
+      }
+    });
+
+    // 中間製品成本（選擇購買的）
+    craftableMaterials.forEach((material) => {
+      const entry = costEntries.get(material.itemId);
+      if (entry?.source === 'buy') {
+        const actualQty = actualRequirements.get(material.itemId) || 0;
+        const purchaseQty = entry.purchaseQty || actualQty;
+        const cost = entry.unitPrice * purchaseQty;
+        craftableCost += cost;
       }
     });
 
     return { baseCost, craftableCost };
-  }, [actualRequirements, actualMaterials, costEntries]);
+  }, [actualRequirements, actualMaterials, costEntries, craftableMaterials]);
 
   // 計算瓶頸分析（哪個材料限制了製作數量）
   const bottleneckAnalysis = useMemo(() => {
@@ -430,6 +451,9 @@ export function MaterialCostCalculator({
                     需求量
                   </th>
                   <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">
+                    購買量
+                  </th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">
                     購買單價
                   </th>
                   <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">
@@ -498,6 +522,40 @@ export function MaterialCostCalculator({
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">
+                        {isBuying ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <input
+                              type="number"
+                              min={0}
+                              value={entry?.purchaseQty || actualQty}
+                              onChange={(e) =>
+                                updatePurchaseQty(
+                                  material.itemId,
+                                  Math.max(0, parseInt(e.target.value) || 0)
+                                )
+                              }
+                              className={`w-20 px-2 py-1 text-right text-sm border rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 ${
+                                (entry?.purchaseQty || actualQty) < actualQty ? 'border-red-400 bg-red-50 dark:bg-red-900/20' : ''
+                              } ${
+                                (entry?.purchaseQty || actualQty) > actualQty ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20' : ''
+                              }`}
+                            />
+                            {(entry?.purchaseQty || actualQty) > actualQty && (
+                              <span className="text-xs text-amber-600" title="多餘數量">
+                                +{(entry?.purchaseQty || actualQty) - actualQty}
+                              </span>
+                            )}
+                            {(entry?.purchaseQty || actualQty) < actualQty && (
+                              <span className="text-xs text-red-600" title="不足數量">
+                                -{actualQty - (entry?.purchaseQty || actualQty)}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right">
                         <input
                           type="number"
                           min={0}
@@ -516,13 +574,18 @@ export function MaterialCostCalculator({
                         />
                       </td>
                       <td className="px-3 py-2 text-right font-medium">
-                        {isBuying && subtotal > 0 ? (
-                          <span className="text-amber-600">
-                            {subtotal.toLocaleString()}
-                          </span>
-                        ) : (
-                          <span className="text-gray-400">-</span>
-                        )}
+                        {isBuying && (() => {
+                          const purchaseQty = entry?.purchaseQty || actualQty;
+                          const cost = (entry?.unitPrice || 0) * purchaseQty;
+                          return cost > 0 ? (
+                            <span className="text-amber-600">
+                              {cost.toLocaleString()}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          );
+                        })()}
+                        {!isBuying && <span className="text-gray-400">-</span>}
                       </td>
                     </tr>
                   );
