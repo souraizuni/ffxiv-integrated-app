@@ -106,21 +106,64 @@ users/{userId}
 
 ## 🚢 部署
 
-### Vercel 部署（推薦）
+### GitHub Pages 部署（目前使用）
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/your-username/ffxiv-integrated-app)
+本專案已設定自動部署至 GitHub Pages：
 
-1. Fork 此專案
-2. 在 Vercel 建立新專案並連接 GitHub
-3. 設定環境變數
-4. 部署！
+1. **設定 GitHub Secrets**
+   
+   前往 Repository → Settings → Secrets and variables → Actions，新增以下 secrets：
+   
+   ```
+   NEXT_PUBLIC_FIREBASE_API_KEY
+   NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+   NEXT_PUBLIC_FIREBASE_PROJECT_ID
+   NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+   NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+   NEXT_PUBLIC_FIREBASE_APP_ID
+   ```
+
+2. **啟用 GitHub Pages**
+   
+   前往 Repository → Settings → Pages：
+   - Source: 選擇 **GitHub Actions**
+
+3. **觸發部署**
+   
+   推送到 `main` 分支會自動觸發部署，或手動執行 Actions。
+
+4. **訪問網站**
+   
+   部署完成後，訪問 `https://your-username.github.io/ffxiv-integrated-app/`
+
+### Firebase 設定（僅用於登入和資料庫）
+
+GitHub Pages 搭配 Firebase 使用時，需要額外設定：
+
+1. **新增授權網域**
+   
+   Firebase Console → Authentication → Settings → Authorized domains
+   
+   新增：`your-username.github.io`
+
+2. **Firestore 安全規則**
+   ```
+   rules_version = '2';
+   service cloud.firestore {
+     match /databases/{database}/documents {
+       match /users/{userId}/{document=**} {
+         allow read, write: if request.auth != null && request.auth.uid == userId;
+       }
+     }
+   }
+   ```
 
 ### 其他平台
 
-專案也可以部署到任何支援 Next.js 的平台：
+專案也可以部署到任何支援靜態網站的平台：
+- Vercel
 - Netlify
-- Railway
-- Render
+- Cloudflare Pages
 
 ## 📊 免費額度管理
 
