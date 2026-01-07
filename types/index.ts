@@ -58,6 +58,16 @@ export interface Recipe {
   baseDurability?: number;
   // RecipeLevelTable ID（用於 WASM 求解器）
   recipeLevelId?: number;
+  // 收藏品資訊
+  isCollectable?: boolean;
+  collectability?: CollectabilityThreshold;
+}
+
+// ---- 收藏品門檻 ----
+export interface CollectabilityThreshold {
+  low: number;   // 普通（一檔）
+  mid: number;   // 精選（二檔）
+  high: number;  // 特選（三檔）
 }
 
 // ---- 材料樹結構 ----

@@ -197,6 +197,48 @@ export async function getCraftTypeList(): Promise<CraftType[]> {
   return resp.json();
 }
 
+// ---- 收藏品門檻資料 ----
+export interface CollectablesShopRefine {
+  id: number;
+  low_collectability: number;   // 普通（一檔）
+  mid_collectability: number;   // 精選（二檔）
+  high_collectability: number;  // 特選（三檔）
+}
+
+// ---- 取得配方收藏品門檻 ----
+export async function getRecipeCollectability(recipeId: number): Promise<CollectablesShopRefine | null> {
+  const query = new URLSearchParams({ recipe_id: String(recipeId) });
+  const url = `${YYYY_GAMES_BASE}recipe_collectability?${query.toString()}`;
+
+  try {
+    const resp = await fetch(url, {
+      method: 'GET',
+      mode: 'cors',
+    });
+
+    if (!resp.ok) {
+      console.warn(`取得收藏品門檻失敗: ${resp.status}`);
+      return null;
+    }
+
+    const data = await resp.json();
+    // API 返回 null 表示不是收藏品
+    if (!data) {
+      return null;
+    }
+    
+    return {
+      id: data.id ?? 0,
+      low_collectability: data.low_collectability ?? 0,
+      mid_collectability: data.mid_collectability ?? 0,
+      high_collectability: data.high_collectability ?? 0,
+    };
+  } catch (e) {
+    console.error('取得收藏品門檻失敗:', e);
+    return null;
+  }
+}
+
 // ---- 職業名稱轉職業代碼 ----
 const jobNameMap: Record<string, CraftJob> = {
   '木工': 'CRP',
@@ -245,8 +287,11 @@ export async function convertToRecipe(recipeInfo: RecipeInfo): Promise<Recipe> {
   // 取得配方等級表以計算實際數值
   const levelTable = await getRecipeLevelTable(recipeInfo.rlv);
   
-  // 取得材料列表
-  const ingredients = await getRecipeIngredients(recipeInfo.id);
+  // 並行取得材料列表和收藏品門檻
+  const [ingredients, collectability] = await Promise.all([
+    getRecipeIngredients(recipeInfo.id),
+    getRecipeCollectability(recipeInfo.id),
+  ]);
   
   // 計算實際配方值（基礎值 * 因子 / 100）
   const actualDifficulty = Math.floor((levelTable.difficulty * recipeInfo.difficulty_factor) / 100);
@@ -260,6 +305,13 @@ export async function convertToRecipe(recipeInfo: RecipeInfo): Promise<Recipe> {
       amount: ing.amount,
       isHQ: false,
     }));
+
+  // 轉換收藏品門檻格式
+  const isCollectable = collectability !== null && (
+    collectability.low_collectability > 0 ||
+    collectability.mid_collectability > 0 ||
+    collectability.high_collectability > 0
+  );
 
   return {
     id: recipeInfo.id,
@@ -287,6 +339,13 @@ export async function convertToRecipe(recipeInfo: RecipeInfo): Promise<Recipe> {
     qualityDivider: levelTable.quality_divider,
     qualityModifier: levelTable.quality_modifier,
     conditionsFlag: levelTable.conditions_flag,
+    // 收藏品資訊
+    isCollectable,
+    collectability: isCollectable ? {
+      low: collectability!.low_collectability,
+      mid: collectability!.mid_collectability,
+      high: collectability!.high_collectability,
+    } : undefined,
   };
 }
 
