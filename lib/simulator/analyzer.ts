@@ -402,7 +402,7 @@ export function analyzeSequence(
   
   // 檢查內靜是否被充分利用
   const innerQuiet = state.buffs.find(b => b.name === 'InnerQuiet');
-  if (innerQuiet && innerQuiet.stacks && innerQuiet.stacks >= 8 && state.isComplete) {
+  if (innerQuiet && innerQuiet.stacks && innerQuiet.stacks >= 8 && !state.isComplete) {
     suggestions.push(`內靜有 ${innerQuiet.stacks} 層未使用，考慮加入比爾格的祝福`);
   }
   

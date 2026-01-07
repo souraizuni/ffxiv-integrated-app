@@ -160,6 +160,25 @@ export function CraftingSimulator({
     setIsSolving(true);
     setSolverResult(null);
     
+    // 調試日誌：顯示傳入的配方資訊
+    console.log('[CraftingSimulator] handleSolve - Recipe:', {
+      recipeLevel: recipe.recipeLevel,
+      difficulty: recipe.difficulty,
+      baseDifficulty: recipe.baseDifficulty,
+      quality: recipe.quality,
+      baseQuality: recipe.baseQuality,
+      qualityDivider: recipe.qualityDivider,
+      progressDivider: recipe.progressDivider,
+      recipeLevelId: recipe.recipeLevelId,
+    });
+    
+    // 驗證 baseQuality 是否來自正確的 RecipeLevelTable
+    // Lv85 應該是 baseQuality=6700, qualityDivider=109
+    // 如果 baseQuality 等於 quality，表示 RecipeLevelTable 可能未正確載入
+    if (recipe.baseQuality === recipe.quality && recipe.baseQuality !== undefined) {
+      console.warn('[CraftingSimulator] 警告：baseQuality 等於 quality，RecipeLevelTable 可能未正確載入');
+    }
+    
     try {
       // raphaelSolver 現在是非同步的，支援 WASM 後端
       const result = await raphaelSolver(recipe, crafterStats, solverOptions);

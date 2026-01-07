@@ -199,14 +199,16 @@ export function calculateQualityIncrease(
   const innerQuiet = state.buffs.find(b => b.name === 'InnerQuiet');
   const innerQuietStacks = innerQuiet?.stacks || 0;
   
-  // 比爾格的祝福特殊處理：基礎 100% + 每層內靜 20%，最高 300%
+  // 比爾格的祝福特殊處理：基礎 100% + 每層內靜 20%
+  // 最多 10 層內靜 = 100 + (10 * 20) = 300%
   if (action.id === 'byregots_blessing') {
-    efficiency = Math.min(100 + (innerQuietStacks * 20), 300);
+    efficiency = 100 + (innerQuietStacks * 20);
   }
   
   const baseTouch = caches?.baseTouch || calculateBaseTouch(state.crafterStats, state.recipe);
   const buffMultiplier = getTouchBuffMultiplier(state.buffs);
-  const innerQuietMultiplier = getInnerQuietMultiplier(state.buffs);
+  // 比爾格的祝福內靜已在效率中計算，不需再套用 innerQuietMultiplier
+  const innerQuietMultiplier = action.id === 'byregots_blessing' ? 1.0 : getInnerQuietMultiplier(state.buffs);
   const conditionMultiplier = getConditionModifier(state.condition, 'quality');
   
   // 品質公式: floor(baseTouch * (efficiency/100) * buffMultiplier * innerQuietMultiplier * conditionMultiplier)

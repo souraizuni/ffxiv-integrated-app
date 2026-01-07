@@ -50,6 +50,8 @@ export interface Recipe {
   qualityDivider: number;
   qualityModifier: number;
   conditionsFlag: number;
+  // 材料品質係數（初期品質最大值百分比）
+  materialQualityFactor?: number;
   // RecipeLevelTable 的基礎值（用於 WASM 求解器的精確計算）
   baseDifficulty?: number;
   baseQuality?: number;
