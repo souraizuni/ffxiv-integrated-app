@@ -15,6 +15,7 @@ import type {
   WasmScopeResult,
   WasmCollectablesShopRefine,
 } from './wasm-types';
+import { getBasePath } from '@/lib/utils/base-path';
 
 // WASM 模組狀態
 let wasmModule: any = null;
@@ -51,9 +52,7 @@ export async function initWasm(): Promise<boolean> {
       
       // 從 public 目錄載入 WASM 二進位檔案
       // GitHub Pages 部署時 basePath 會是 /ffxiv-integrated-app
-      const basePath = typeof window !== 'undefined' 
-        ? (window as any).__NEXT_DATA__?.basePath || ''
-        : '';
+      const basePath = getBasePath();
       const wasmUrl = `${basePath}/wasm/app_wasm_bg.wasm`;
       
       // 初始化
