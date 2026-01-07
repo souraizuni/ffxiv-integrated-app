@@ -1,14 +1,15 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { ItemSearch, MaterialTree, MaterialList, Sidebar, MaterialCostCalculator } from '@/components';
+import { RecipeSearch, MaterialTree, Sidebar, MaterialCostCalculator } from '@/components';
 import { ItemSourceBadges, ItemSourceInfoPanel } from '@/components/item-source-info';
 import { CraftingSimulator } from '@/components/crafting-simulator';
 import { CrafterStatusEditor } from '@/components/crafter-status-editor';
-import { useRecipe, fetchRecipe } from '@/hooks/use-xivapi';
+import { fetchRecipe } from '@/hooks/use-xivapi';
 import { buildMaterialTree, flattenMaterialTree } from '@/lib/recipe-tree';
 import { useGearsets, JOB_NAMES } from '@/hooks/use-gearsets';
-import type { Item, MaterialTreeNode, CrafterStats, Recipe, CraftAction, CraftJob, FlattenedMaterial } from '@/types';
+import { convertToRecipe, getItemInfo, type RecipeInfo } from '@/lib/recipe-datasource';
+import type { MaterialTreeNode, CrafterStats, Recipe, CraftAction, CraftJob, FlattenedMaterial } from '@/types';
 
 // 預設製作者屬性
 const defaultCrafterStats: CrafterStats = {
@@ -20,8 +21,19 @@ const defaultCrafterStats: CrafterStats = {
   specialist: false,
 };
 
+// CAFEMAKER 圖標 URL
+const CAFEMAKER_BASE = 'https://cafemaker.wakingsands.com';
+
 export default function CraftingPage() {
-  const [selectedItem, setSelectedItem] = useState<Item | null>(null);
+  // 選擇的配方資訊（來自 yyyy.games API）
+  const [selectedRecipeInfo, setSelectedRecipeInfo] = useState<RecipeInfo | null>(null);
+  // 轉換後的配方（用於模擬器）
+  const [recipe, setRecipe] = useState<Recipe | null>(null);
+  // 選擇的物品資訊（用於顯示）
+  const [selectedItem, setSelectedItem] = useState<{ id: number; name: string; iconUrl: string } | null>(null);
+  // 載入狀態
+  const [isRecipeLoading, setIsRecipeLoading] = useState(false);
+  
   const [materialTree, setMaterialTree] = useState<MaterialTreeNode | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showSimulator, setShowSimulator] = useState(false);
@@ -42,19 +54,51 @@ export default function CraftingPage() {
   // 從配裝取得 CrafterStats，如果沒有配裝則使用預設值
   const crafterStats = gearsets.length > 0 ? toCrafterStats(currentJob, selectedGearsetId) : defaultCrafterStats;
 
-  const { recipe, isLoading: isRecipeLoading } = useRecipe(selectedItem?.id ?? null);
-
-  // 當配方載入時，更新職業
-  useEffect(() => {
-    if (recipe) {
-      setCurrentJob(recipe.craftType);
+  // 當選擇配方時，轉換為完整配方並載入資料
+  const handleRecipeSelect = useCallback(async (recipeInfo: RecipeInfo) => {
+    setSelectedRecipeInfo(recipeInfo);
+    setIsRecipeLoading(true);
+    
+    // 設定基本物品資訊（用於顯示）
+    setSelectedItem({
+      id: recipeInfo.item_id,
+      name: recipeInfo.item_name,
+      // 暫時使用空圖標，稍後會更新
+      iconUrl: '',
+    });
+    
+    try {
+      // 並行執行：轉換配方和獲取物品詳細資訊
+      const [fullRecipe, itemInfo] = await Promise.all([
+        convertToRecipe(recipeInfo),
+        getItemInfo(recipeInfo.item_id).catch(() => null),
+      ]);
+      
+      setRecipe(fullRecipe);
+      
+      // 更新職業
+      setCurrentJob(fullRecipe.craftType);
+      
       // 自動選擇對應職業的配裝
-      const jobGearset = getForJob(recipe.craftType);
+      const jobGearset = getForJob(fullRecipe.craftType);
       if (jobGearset) {
         setSelectedGearsetId(jobGearset.id);
       }
+      
+      // 更新物品圖標（如果有）
+      if (itemInfo) {
+        setSelectedItem(prev => prev ? {
+          ...prev,
+          // 使用 CAFEMAKER 獲取圖標
+          iconUrl: `${CAFEMAKER_BASE}/i/${Math.floor(itemInfo.id / 1000) * 1000}/${String(itemInfo.id).padStart(6, '0')}.png`,
+        } : null);
+      }
+    } catch (error) {
+      console.error('Failed to convert recipe:', error);
+    } finally {
+      setIsRecipeLoading(false);
     }
-  }, [recipe, getForJob]);
+  }, [getForJob]);
 
   // 當選擇物品時，建構材料樹
   useEffect(() => {
@@ -252,46 +296,66 @@ export default function CraftingPage() {
       {showQuickAnalyzer && !recipe && (
         <div className="mb-8 p-6 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-700">
           <p className="text-amber-700 dark:text-amber-300 text-center">
-            請先選擇一個有配方的物品以使用快速分析功能
+            請先選擇一個配方以使用快速分析功能
           </p>
         </div>
       )}
 
-      {/* 搜尋區塊 */}
+      {/* 搜尋區塊 - 使用新的配方搜尋 */}
       <div className="mb-8">
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          搜尋要製作的物品
+          搜尋配方（支援繁體中文直接搜尋）
         </label>
-        <ItemSearch
-          onSelect={setSelectedItem}
-          placeholder="輸入物品名稱..."
+        <RecipeSearch
+          onSelect={handleRecipeSelect}
+          placeholder="輸入配方名稱，例如：白鋼錠、玄鐵鑄錠..."
         />
+        <p className="mt-2 text-xs text-gray-500">
+          💡 提示：直接輸入繁體中文即可搜尋，無需轉換
+        </p>
       </div>
 
-      {/* 選中的物品 */}
+      {/* 選中的配方 */}
       {selectedItem && (
         <div className="mb-8 p-4 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-4">
-            <img
-              src={selectedItem.iconUrl}
-              alt={selectedItem.name}
-              className="w-12 h-12"
-            />
+            {selectedItem.iconUrl ? (
+              <img
+                src={selectedItem.iconUrl}
+                alt={selectedItem.name}
+                className="w-12 h-12"
+                onError={(e) => {
+                  // 圖標載入失敗時顯示預設圖標
+                  (e.target as HTMLImageElement).style.display = 'none';
+                }}
+              />
+            ) : (
+              <div className="w-12 h-12 bg-gray-200 dark:bg-gray-700 rounded flex items-center justify-center">
+                <span className="text-2xl">🔨</span>
+              </div>
+            )}
             <div className="flex-1">
               <h2 className="text-xl font-bold">
                 {selectedItem.name}
               </h2>
               {isRecipeLoading ? (
-                <p className="text-sm text-gray-500">載入配方中...</p>
+                <p className="text-sm text-gray-500">載入配方詳情中...</p>
               ) : recipe ? (
-                <p className="text-sm text-gray-500">
-                  配方等級: {recipe.recipeLevel} | 
-                  難度: {recipe.difficulty} | 
-                  品質: {recipe.quality} |
-                  耐久: {recipe.durability}
-                </p>
+                <div className="text-sm text-gray-500 space-y-1">
+                  <p>
+                    <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs mr-2">
+                      {JOB_NAMES[recipe.craftType]}
+                    </span>
+                    配方等級: {recipe.recipeLevel}
+                  </p>
+                  <p>
+                    難度: {recipe.difficulty} | 
+                    品質: {recipe.quality} |
+                    耐久: {recipe.durability}
+                  </p>
+                </div>
               ) : (
-                <p className="text-sm text-amber-500">此物品沒有配方（基礎材料）</p>
+                <p className="text-sm text-amber-500">無法載入配方資訊</p>
               )}
             </div>
             <div className="flex gap-2">
@@ -364,7 +428,7 @@ export default function CraftingPage() {
               <MaterialCostCalculator
                 materials={flattenedMaterials}
                 materialTree={materialTree}
-                craftYield={recipe?.amountResult || 1}
+                craftYield={recipe?.craftTypeLevel || 1}
               />
             </div>
           )}
@@ -375,9 +439,9 @@ export default function CraftingPage() {
       {!selectedItem && !isLoading && (
         <div className="text-center py-16 text-gray-500">
           <div className="text-6xl mb-4">🔨</div>
-          <p className="text-lg">搜尋物品以查看製作指引</p>
+          <p className="text-lg">搜尋配方以查看製作指引</p>
           <p className="text-sm mt-2">
-            系統會自動拆解材料樹，顯示所有需要的基礎材料
+            使用繁體中文直接搜尋，系統會自動拆解材料樹
           </p>
         </div>
       )}
@@ -397,7 +461,7 @@ export default function CraftingPage() {
           />
         ) : (
           <div className="text-center py-8 text-gray-500">
-            請選擇一個有配方的物品
+            請選擇一個配方
           </div>
         )}
       </Sidebar>
