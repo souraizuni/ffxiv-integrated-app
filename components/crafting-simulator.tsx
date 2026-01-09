@@ -17,6 +17,7 @@ import {
 import { raphaelSolver, type RaphaelSolverOptions, type SolverResult } from '@/lib/simulator/solver';
 import { CraftingAnalyzer } from './crafting-analyzer';
 import { MacroExporter } from './macro-exporter';
+import { MEALS, MEDICINES, SOUL_OF_THE_CRAFTER, calculateEnhancedAttributes, getEnhancerEffectText, getEnhancerDisplayName, type Enhancer } from '@/data/enhancers';
 
 // Cookie 鍵名
 const SOLVER_OPTIONS_COOKIE_KEY = 'ffxiv-solver-options';
@@ -82,6 +83,42 @@ export function CraftingSimulator({
   const [solverResult, setSolverResult] = useState<SolverResult | null>(null);
   const [showMacroExport, setShowMacroExport] = useState(false);
   const [showSolverSettings, setShowSolverSettings] = useState(false);
+  
+  // 食物和藥水設定
+  const [selectedMeal, setSelectedMeal] = useState<Enhancer | null>(null);
+  const [selectedMedicine, setSelectedMedicine] = useState<Enhancer | null>(null);
+  const [useSoulOfCrafter, setUseSoulOfCrafter] = useState(false);
+  
+  // 計算增強後的屬性
+  const enhancedStats = useMemo(() => {
+    const enhancers: Enhancer[] = [];
+    if (selectedMeal) enhancers.push(selectedMeal);
+    if (selectedMedicine) enhancers.push(selectedMedicine);
+    if (useSoulOfCrafter) enhancers.push(SOUL_OF_THE_CRAFTER);
+    
+    if (enhancers.length === 0) return null;
+    
+    return calculateEnhancedAttributes(
+      {
+        craftsmanship: crafterStats.craftsmanship,
+        control: crafterStats.control,
+        cp: crafterStats.cp,
+        level: crafterStats.level,
+      },
+      enhancers
+    );
+  }, [crafterStats, selectedMeal, selectedMedicine, useSoulOfCrafter]);
+  
+  // 用於求解的實際屬性（包含食物/藥水加成）
+  const effectiveStats: CrafterStats = useMemo(() => {
+    if (!enhancedStats) return crafterStats;
+    return {
+      ...crafterStats,
+      craftsmanship: enhancedStats.craftsmanship,
+      control: enhancedStats.control,
+      cp: enhancedStats.cp,
+    };
+  }, [crafterStats, enhancedStats]);
   
   // 當選項改變時儲存到 cookie
   useEffect(() => {
@@ -180,6 +217,14 @@ export function CraftingSimulator({
       recipeLevelId: recipe.recipeLevelId,
     });
     
+    // 調試日誌：顯示使用的屬性（包含食物/藥水加成）
+    console.log('[CraftingSimulator] handleSolve - Stats:', {
+      base: crafterStats,
+      effective: effectiveStats,
+      meal: selectedMeal ? getEnhancerDisplayName(selectedMeal) : undefined,
+      medicine: selectedMedicine ? getEnhancerDisplayName(selectedMedicine) : undefined,
+    });
+    
     // 驗證 baseQuality 是否來自正確的 RecipeLevelTable
     // Lv85 應該是 baseQuality=6700, qualityDivider=109
     // 如果 baseQuality 等於 quality，表示 RecipeLevelTable 可能未正確載入
@@ -189,7 +234,8 @@ export function CraftingSimulator({
     
     try {
       // raphaelSolver 現在是非同步的，支援 WASM 後端
-      const result = await raphaelSolver(recipe, crafterStats, solverOptions);
+      // 使用 effectiveStats 包含食物/藥水加成
+      const result = await raphaelSolver(recipe, effectiveStats, solverOptions);
       setSolverResult(result);
     } catch (error) {
       console.error('Solver error:', error);
@@ -197,7 +243,7 @@ export function CraftingSimulator({
     } finally {
       setIsSolving(false);
     }
-  }, [recipe, crafterStats, solverOptions]);
+  }, [recipe, effectiveStats, solverOptions, crafterStats, selectedMeal, selectedMedicine]);
   
   // 應用求解結果
   const handleApplySolverResult = useCallback(() => {
@@ -553,6 +599,108 @@ export function CraftingSimulator({
                   </div>
                 </div>
                 
+                {/* 食物與藥水 */}
+                <div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">食物、藥水與裝備</div>
+                  <div className="space-y-3">
+                    {/* 專家之證 */}
+                    <label className="flex items-center gap-2 text-sm p-2 rounded bg-amber-50 dark:bg-amber-900/20 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useSoulOfCrafter}
+                        onChange={(e) => setUseSoulOfCrafter(e.target.checked)}
+                        className="rounded text-amber-500 focus:ring-amber-500"
+                      />
+                      <span>⭐ 專家之證</span>
+                      <span className="text-xs text-amber-600 dark:text-amber-400">
+                        {getEnhancerEffectText(SOUL_OF_THE_CRAFTER)}
+                      </span>
+                    </label>
+                    
+                    {/* 食物選擇 */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm">🍽️ 食物</span>
+                      </div>
+                      <select
+                        value={selectedMeal?.id || 0}
+                        onChange={(e) => {
+                          const id = Number(e.target.value);
+                          setSelectedMeal(MEALS.find(m => m.id === id) || null);
+                        }}
+                        className="w-full px-2 py-1.5 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-600"
+                      >
+                        <option value={0}>無</option>
+                        {MEALS.map(meal => (
+                          <option key={meal.id} value={meal.id}>
+                            {getEnhancerDisplayName(meal)} - {getEnhancerEffectText(meal)}
+                          </option>
+                        ))}
+                      </select>
+                      {selectedMeal && (
+                        <div className="mt-1 text-xs text-purple-600 dark:text-purple-400 flex items-center gap-1">
+                          <span>📊 {getEnhancerDisplayName(selectedMeal)}: {getEnhancerEffectText(selectedMeal)}</span>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* 藥水選擇 */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm">🧪 藥水</span>
+                      </div>
+                      <select
+                        value={selectedMedicine?.id || 0}
+                        onChange={(e) => {
+                          const id = Number(e.target.value);
+                          setSelectedMedicine(MEDICINES.find(m => m.id === id) || null);
+                        }}
+                        className="w-full px-2 py-1.5 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-600"
+                      >
+                        <option value={0}>無</option>
+                        {MEDICINES.map(med => (
+                          <option key={med.id} value={med.id}>
+                            {getEnhancerDisplayName(med)} - {getEnhancerEffectText(med)}
+                          </option>
+                        ))}
+                      </select>
+                      {selectedMedicine && (
+                        <div className="mt-1 text-xs text-purple-600 dark:text-purple-400 flex items-center gap-1">
+                          <span>📊 {getEnhancerDisplayName(selectedMedicine)}: {getEnhancerEffectText(selectedMedicine)}</span>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* 顯示加成效果 */}
+                    {enhancedStats && (
+                      <div className="p-2 bg-green-50 dark:bg-green-900/20 rounded-lg text-xs space-y-1">
+                        <div className="text-green-700 dark:text-green-300 font-medium mb-1">📈 屬性加成總計</div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600 dark:text-gray-400">作業精度:</span>
+                          <span className="text-green-600 dark:text-green-400">
+                            {crafterStats.craftsmanship} → {enhancedStats.craftsmanship}
+                            <span className="ml-1">(+{enhancedStats.bonuses.cm})</span>
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600 dark:text-gray-400">加工精度:</span>
+                          <span className="text-green-600 dark:text-green-400">
+                            {crafterStats.control} → {enhancedStats.control}
+                            <span className="ml-1">(+{enhancedStats.bonuses.ct})</span>
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600 dark:text-gray-400">CP:</span>
+                          <span className="text-green-600 dark:text-green-400">
+                            {crafterStats.cp} → {enhancedStats.cp}
+                            <span className="ml-1">(+{enhancedStats.bonuses.cp})</span>
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 {/* 求解選項 */}
                 <div>
                   <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">求解設定</div>

@@ -7,7 +7,7 @@ import { CraftingSimulator } from '@/components/crafting-simulator';
 import { fetchRecipe } from '@/hooks/use-xivapi';
 import { buildMaterialTree, flattenMaterialTree } from '@/lib/recipe-tree';
 import { useGearsets, JOB_NAMES } from '@/hooks/use-gearsets';
-import { convertToRecipe, getItemInfo, type RecipeInfo } from '@/lib/recipe-datasource';
+import { convertToRecipe, getItemInfo, getRecipeByItemId, type RecipeInfo } from '@/lib/recipe-datasource';
 import type { MaterialTreeNode, CrafterStats, Recipe, CraftJob, FlattenedMaterial } from '@/types';
 
 // 預設製作者屬性
@@ -37,6 +37,13 @@ export default function CraftingPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [showStatsEditor, setShowStatsEditor] = useState(false);
   const [showCostCalculator, setShowCostCalculator] = useState(false);
+  
+  // 從生產紀錄載入的資料
+  const [loadedProductionData, setLoadedProductionData] = useState<{
+    multiplier: number;
+    entries: any[];
+  } | null>(null);
+  const [showLoadedNotice, setShowLoadedNotice] = useState(false);
 
   // 使用配裝系統
   const { gearsets, getForJob, toCrafterStats, getDisplayName } = useGearsets();
@@ -47,6 +54,76 @@ export default function CraftingPage() {
   
   // 從配裝取得 CrafterStats，如果沒有配裝則使用預設值
   const crafterStats = gearsets.length > 0 ? toCrafterStats(currentJob, selectedGearsetId) : defaultCrafterStats;
+
+  // 檢查是否有從生產紀錄載入的資料
+  useEffect(() => {
+    const raw = sessionStorage.getItem('loaded_production_record');
+    if (raw) {
+      try {
+        const record = JSON.parse(raw);
+        setLoadedProductionData({
+          multiplier: record.multiplier,
+          entries: record.entries,
+        });
+        setShowCostCalculator(true);
+        setShowLoadedNotice(true);
+        
+        // 如果有 targetItemId，自動載入對應配方
+        if (record.targetItemId) {
+          loadRecipeByItemId(record.targetItemId, record.materialTree?.name);
+        }
+        
+        // 清除 sessionStorage
+        sessionStorage.removeItem('loaded_production_record');
+      } catch (e) {
+        console.error('Failed to load production record:', e);
+      }
+    }
+  }, []);
+
+  // 透過 itemId 載入配方
+  const loadRecipeByItemId = async (itemId: number, itemName?: string) => {
+    setIsRecipeLoading(true);
+    try {
+      // 設定基本物品資訊（用於顯示）
+      setSelectedItem({
+        id: itemId,
+        name: itemName || `物品 ${itemId}`,
+        iconUrl: '',
+      });
+
+      // 取得配方
+      const fullRecipe = await getRecipeByItemId(itemId);
+      if (fullRecipe) {
+        setRecipe(fullRecipe);
+        setCurrentJob(fullRecipe.craftType);
+
+        // 自動選擇對應職業的配裝
+        const jobGearset = getForJob(fullRecipe.craftType);
+        if (jobGearset) {
+          setSelectedGearsetId(jobGearset.id);
+        }
+      }
+
+      // 取得物品詳細資訊（圖示）
+      const itemInfo = await getItemInfo(itemId).catch(() => null);
+      if (itemInfo) {
+        setSelectedItem((prev) =>
+          prev
+            ? {
+                ...prev,
+                name: itemInfo.name || prev.name,
+                iconUrl: `${CAFEMAKER_BASE}/i/${Math.floor(itemInfo.id / 1000) * 1000}/${String(itemInfo.id).padStart(6, '0')}.png`,
+              }
+            : null
+        );
+      }
+    } catch (error) {
+      console.error('Failed to load recipe by item ID:', error);
+    } finally {
+      setIsRecipeLoading(false);
+    }
+  };
 
   // 當選擇配方時，轉換為完整配方並載入資料
   const handleRecipeSelect = useCallback(async (recipeInfo: RecipeInfo) => {
@@ -327,11 +404,26 @@ export default function CraftingPage() {
               {/* 成本計算器 */}
               {showCostCalculator && (
                 <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-                  <h3 className="text-sm font-semibold mb-3">💰 材料成本計算</h3>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold">💰 材料成本計算</h3>
+                    {showLoadedNotice && (
+                      <div className="flex items-center gap-2 text-sm text-purple-600 bg-purple-50 dark:bg-purple-900/20 px-3 py-1 rounded-lg">
+                        <span>✅ 已載入生產紀錄資料</span>
+                        <button
+                          onClick={() => setShowLoadedNotice(false)}
+                          className="text-gray-400 hover:text-gray-600"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   <MaterialCostCalculator
                     materials={flattenedMaterials}
                     materialTree={materialTree}
                     craftYield={recipe?.craftTypeLevel || 1}
+                    initialData={loadedProductionData}
+                    onDataLoaded={() => setLoadedProductionData(null)}
                   />
                 </div>
               )}

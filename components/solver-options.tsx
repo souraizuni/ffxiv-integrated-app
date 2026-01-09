@@ -12,6 +12,8 @@ import {
   MEALS,
   MEDICINES,
   calculateEnhancedAttributes,
+  getEnhancerEffectText,
+  getEnhancerDisplayName,
 } from '@/data/enhancers';
 import type { Recipe, CrafterStats } from '@/types';
 import type { RaphaelSolverOptions } from '@/lib/simulator/solver';
@@ -34,8 +36,6 @@ export interface EnhancerSelectorProps {
   value?: Enhancer;
   onChange: (enhancer: Enhancer | undefined) => void;
   label: string;
-  useHQ?: boolean;
-  onUseHQChange?: (useHQ: boolean) => void;
 }
 
 // ============================================
@@ -47,30 +47,13 @@ export function EnhancerSelector({
   value,
   onChange,
   label,
-  useHQ = true,
-  onUseHQChange,
 }: EnhancerSelectorProps) {
-  // 過濾掉 "None" 選項以便單獨處理
-  const validEnhancers = enhancers.filter(e => e.id !== 0);
-  const noneOption = enhancers.find(e => e.id === 0);
-
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
           {label}
         </label>
-        {onUseHQChange && (
-          <label className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-            <input
-              type="checkbox"
-              checked={useHQ}
-              onChange={(e) => onUseHQChange(e.target.checked)}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            HQ
-          </label>
-        )}
       </div>
       <select
         value={value?.id ?? 0}
@@ -85,13 +68,18 @@ export function EnhancerSelector({
         }}
         className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
       >
-        <option value={0}>{noneOption?.nameZh ?? '無'}</option>
-        {validEnhancers.map((enhancer) => (
+        <option value={0}>無</option>
+        {enhancers.map((enhancer) => (
           <option key={enhancer.id} value={enhancer.id}>
-            {enhancer.nameZh} (IL{enhancer.itemLevel})
+            {getEnhancerDisplayName(enhancer)} - {getEnhancerEffectText(enhancer)}
           </option>
         ))}
       </select>
+      {value && (
+        <div className="text-xs text-purple-600 dark:text-purple-400">
+          📊 {getEnhancerDisplayName(value)}: {getEnhancerEffectText(value)}
+        </div>
+      )}
     </div>
   );
 }
@@ -313,8 +301,6 @@ export function SolverOptionsPanel({
   // 狀態
   const [meal, setMeal] = useState<Enhancer | undefined>();
   const [medicine, setMedicine] = useState<Enhancer | undefined>();
-  const [useMealHQ, setUseMealHQ] = useState(true);
-  const [useMedicineHQ, setUseMedicineHQ] = useState(true);
   const [initialQuality, setInitialQuality] = useState(0);
   const [solverOptions, setSolverOptions] = useState<RaphaelSolverOptions>({
     useManipulation: true,
@@ -328,41 +314,20 @@ export function SolverOptionsPanel({
   // 計算增強後的屬性
   const enhancedStats = useMemo(() => {
     const enhancers: Enhancer[] = [];
-    if (meal) enhancers.push({ ...meal, hqMultiplier: useMealHQ ? 1.5 : 1 });
-    if (medicine) enhancers.push({ ...medicine, hqMultiplier: useMedicineHQ ? 1.5 : 1 });
+    if (meal) enhancers.push(meal);
+    if (medicine) enhancers.push(medicine);
 
     // 計算食物藥水的加成
-    const mealResult = meal ? calculateEnhancedAttributes(crafterStats, [meal], useMealHQ) : null;
-    const medicineResult = medicine ? calculateEnhancedAttributes(crafterStats, [medicine], useMedicineHQ) : null;
-
-    // 合併加成
-    let totalCmBonus = 0;
-    let totalCtBonus = 0;
-    let totalCpBonus = 0;
-
-    if (mealResult) {
-      totalCmBonus += mealResult.bonuses.cm;
-      totalCtBonus += mealResult.bonuses.ct;
-      totalCpBonus += mealResult.bonuses.cp;
-    }
-    if (medicineResult) {
-      totalCmBonus += medicineResult.bonuses.cm;
-      totalCtBonus += medicineResult.bonuses.ct;
-      totalCpBonus += medicineResult.bonuses.cp;
-    }
+    const result = calculateEnhancedAttributes(crafterStats, enhancers);
 
     return {
       ...crafterStats,
-      craftsmanship: crafterStats.craftsmanship + totalCmBonus,
-      control: crafterStats.control + totalCtBonus,
-      cp: crafterStats.cp + totalCpBonus,
-      bonuses: {
-        craftsmanship: totalCmBonus,
-        control: totalCtBonus,
-        cp: totalCpBonus,
-      },
+      craftsmanship: result.craftsmanship,
+      control: result.control,
+      cp: result.cp,
+      bonuses: result.bonuses,
     };
-  }, [crafterStats, meal, medicine, useMealHQ, useMedicineHQ]);
+  }, [crafterStats, meal, medicine]);
 
   // 當屬性變更時通知父元件
   React.useEffect(() => {
@@ -413,32 +378,28 @@ export function SolverOptionsPanel({
             value={meal}
             onChange={setMeal}
             label="食物"
-            useHQ={useMealHQ}
-            onUseHQChange={setUseMealHQ}
           />
           <EnhancerSelector
             enhancers={MEDICINES}
             value={medicine}
             onChange={setMedicine}
             label="藥水"
-            useHQ={useMedicineHQ}
-            onUseHQChange={setUseMedicineHQ}
           />
         </div>
 
         {/* 顯示屬性加成 */}
-        {(enhancedStats.bonuses?.craftsmanship || enhancedStats.bonuses?.control || enhancedStats.bonuses?.cp) && (
+        {(enhancedStats.bonuses?.cm || enhancedStats.bonuses?.ct || enhancedStats.bonuses?.cp) && (
           <div className="rounded-md bg-green-50 p-3 dark:bg-green-900/20">
             <div className="text-sm text-green-700 dark:text-green-300">
               <span className="font-medium">屬性加成：</span>
-              {enhancedStats.bonuses.craftsmanship > 0 && (
+              {enhancedStats.bonuses.cm > 0 && (
                 <span className="ml-2">
-                  作業 +{enhancedStats.bonuses.craftsmanship}
+                  作業 +{enhancedStats.bonuses.cm}
                 </span>
               )}
-              {enhancedStats.bonuses.control > 0 && (
+              {enhancedStats.bonuses.ct > 0 && (
                 <span className="ml-2">
-                  加工 +{enhancedStats.bonuses.control}
+                  加工 +{enhancedStats.bonuses.ct}
                 </span>
               )}
               {enhancedStats.bonuses.cp > 0 && (
