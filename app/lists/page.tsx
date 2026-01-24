@@ -162,6 +162,27 @@ export default function RequirementListsPage() {
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
 
+  // 載入清單物品的圖示（修正舊資料的圖示 URL）
+  useEffect(() => {
+    if (!selectedList) return;
+    
+    // 為清單中的每個物品取得正確的圖示 URL
+    selectedList.items.forEach(item => {
+      if (!iconUrls.has(item.itemId)) {
+        fetchItem(item.itemId)
+          .then(itemInfo => {
+            setIconUrls(prev => new Map(prev).set(item.itemId, itemInfo.iconUrl));
+          })
+          .catch(() => {/* 忽略錯誤 */});
+      }
+    });
+  }, [selectedList, iconUrls]);
+
+  // 取得物品的正確圖示 URL（優先使用快取，否則使用儲存的）
+  const getItemIconUrl = useCallback((item: { itemId: number; iconUrl?: string }) => {
+    return iconUrls.get(item.itemId) || item.iconUrl;
+  }, [iconUrls]);
+
   if (isLoading) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-8">
@@ -431,9 +452,9 @@ export default function RequirementListsPage() {
                               className="flex items-center gap-3 flex-1 min-w-0 text-left hover:opacity-80 transition-opacity group"
                               title="點擊查看生產指引"
                             >
-                              {item.iconUrl && (
+                              {getItemIconUrl(item) && (
                                 <img
-                                  src={item.iconUrl}
+                                  src={getItemIconUrl(item)}
                                   alt={item.itemName}
                                   className="w-12 h-12 rounded"
                                   onError={(e) => {

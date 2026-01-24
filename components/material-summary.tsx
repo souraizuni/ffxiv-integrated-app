@@ -10,6 +10,11 @@ import type { Recipe, FlattenedMaterial, Item } from '@/types';
 import { getRecipeByItemId } from '@/lib/recipe-datasource';
 import { fetchItem } from '@/hooks/use-xivapi';
 
+// ---- 模組層級快取（跨元件生命週期保持） ----
+const materialCache = new Map<string, AggregatedMaterial[]>();
+let lastCalculatedCacheKey = '';
+let isCalculating = false;
+
 // ---- 聚合材料資料 ----
 export interface AggregatedMaterial {
   itemId: number;
@@ -34,6 +39,7 @@ export interface AggregatedMaterial {
 // ---- 成本條目 ----
 interface MaterialCostEntry {
   unitPrice: number;
+  purchaseQty: number;  // 購買數量
   possession: 'buy' | 'have' | 'craft';  // 購買 / 已擁有 / 自己製作
 }
 
@@ -57,11 +63,6 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
   // 成本計算狀態
   const [costEntries, setCostEntries] = useState<Map<number, MaterialCostEntry>>(new Map());
   const [showCostCalculator, setShowCostCalculator] = useState(false);
-  
-  // 快取計算結果（使用 module-level 快取確保跨渲染保持）
-  const cacheRef = useRef<Map<string, AggregatedMaterial[]>>(new Map());
-  const lastCalculatedKeyRef = useRef<string>('');
-  const isCalculatingRef = useRef<boolean>(false);
 
   // 計算 cache key（用 useMemo 確保穩定）
   const cacheKey = useMemo(() => generateCacheKey(items), [items]);
@@ -70,34 +71,47 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
   useEffect(() => {
     if (items.length === 0) {
       setMaterials([]);
-      lastCalculatedKeyRef.current = '';
       return;
     }
 
-    // 如果這個 key 已經計算過，直接使用快取
-    if (lastCalculatedKeyRef.current === cacheKey) {
-      const cached = cacheRef.current.get(cacheKey);
+    // 如果這個 key 已經計算過且快取有效，直接使用
+    if (lastCalculatedCacheKey === cacheKey) {
+      const cached = materialCache.get(cacheKey);
       if (cached && cached.length > 0) {
-        // 快取仍有效，不需重新計算
+        // 確保 materials 已設定（元件重新掛載時需要）
+        if (materials.length === 0) {
+          setMaterials(cached);
+          // 初始化成本條目
+          const newCostEntries = new Map<number, MaterialCostEntry>();
+          cached.forEach(m => {
+            newCostEntries.set(m.itemId, { 
+              unitPrice: 0, 
+              purchaseQty: m.totalAmount,
+              possession: m.isBaseMaterial ? 'buy' : 'craft'
+            });
+          });
+          setCostEntries(newCostEntries);
+        }
         return;
       }
     }
 
     // 檢查是否正在計算中（避免重複請求）
-    if (isCalculatingRef.current) {
+    if (isCalculating) {
       return;
     }
 
     // 從快取中取得結果（可能是之前計算過的）
-    const cached = cacheRef.current.get(cacheKey);
+    const cached = materialCache.get(cacheKey);
     if (cached) {
       setMaterials(cached);
-      lastCalculatedKeyRef.current = cacheKey;
-      // 初始化成本條目（中間產物預設為「自製」，基礎材料預設為「購買」）
+      lastCalculatedCacheKey = cacheKey;
+      // 初始化成本條目
       const newCostEntries = new Map<number, MaterialCostEntry>();
       cached.forEach(m => {
         newCostEntries.set(m.itemId, { 
           unitPrice: 0, 
+          purchaseQty: m.totalAmount,
           possession: m.isBaseMaterial ? 'buy' : 'craft'
         });
       });
@@ -111,7 +125,7 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
 
   const calculateMaterials = async (key: string) => {
     // 設置計算中標記
-    isCalculatingRef.current = true;
+    isCalculating = true;
     setIsLoading(true);
     setError(null);
 
@@ -149,9 +163,9 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
         return b.totalAmount - a.totalAmount;
       });
 
-      // 儲存到快取
-      cacheRef.current.set(key, sortedMaterials);
-      lastCalculatedKeyRef.current = key;
+      // 儲存到快取（模組層級）
+      materialCache.set(key, sortedMaterials);
+      lastCalculatedCacheKey = key;
       
       setMaterials(sortedMaterials);
       
@@ -159,7 +173,8 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
       const newCostEntries = new Map<number, MaterialCostEntry>();
       sortedMaterials.forEach(m => {
         newCostEntries.set(m.itemId, { 
-          unitPrice: 0, 
+          unitPrice: 0,
+          purchaseQty: m.totalAmount,
           possession: m.isBaseMaterial ? 'buy' : 'craft'  // 中間產物預設自製
         });
       });
@@ -169,7 +184,7 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
       setError(e instanceof Error ? e.message : '計算材料時發生錯誤');
     } finally {
       setIsLoading(false);
-      isCalculatingRef.current = false;
+      isCalculating = false;
     }
   };
 
@@ -180,6 +195,18 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
       const entry = newMap.get(itemId);
       if (entry) {
         newMap.set(itemId, { ...entry, unitPrice: price });
+      }
+      return newMap;
+    });
+  }, []);
+
+  // 更新購買數量
+  const updatePurchaseQty = useCallback((itemId: number, qty: number) => {
+    setCostEntries(prev => {
+      const newMap = new Map(prev);
+      const entry = newMap.get(itemId);
+      if (entry) {
+        newMap.set(itemId, { ...entry, purchaseQty: qty });
       }
       return newMap;
     });
@@ -235,7 +262,8 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
       const entry = costEntries.get(intermediate.itemId);
       // 如果中間產物選擇「購買」或「已擁有」，則減少其子材料需求
       if (entry && (entry.possession === 'buy' || entry.possession === 'have')) {
-        const buyAmount = intermediate.totalAmount;
+        // 使用實際購買數量
+        const buyAmount = entry.purchaseQty || intermediate.totalAmount;
         const craftYield = intermediate.craftYield || 1;
         // 購買這麼多中間產物，會減少多少次製作
         const craftsSaved = Math.ceil(buyAmount / craftYield);
@@ -268,11 +296,11 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
       }
     });
     
-    // 中間產物成本（僅計算選擇購買的）
+    // 中間產物成本（僅計算選擇購買的，使用實際購買數量）
     intermediateMaterials.forEach(m => {
       const entry = costEntries.get(m.itemId);
       if (entry && entry.possession === 'buy') {
-        intermediateCost += entry.unitPrice * m.totalAmount;
+        intermediateCost += entry.unitPrice * (entry.purchaseQty || m.totalAmount);
       }
     });
     
@@ -420,6 +448,7 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
                             <th className="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-400">材料</th>
                             <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">需求量</th>
                             <th className="px-3 py-2 text-center font-medium text-gray-600 dark:text-gray-400">方式</th>
+                            <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">購買量</th>
                             <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">單價</th>
                             <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">小計</th>
                           </tr>
@@ -430,7 +459,8 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
                             const possession = entry?.possession || 'craft';
                             const isBuy = possession === 'buy';
                             const isHave = possession === 'have';
-                            const subtotal = isBuy ? (entry?.unitPrice || 0) * material.totalAmount : 0;
+                            const purchaseQty = entry?.purchaseQty || material.totalAmount;
+                            const subtotal = isBuy ? (entry?.unitPrice || 0) * purchaseQty : 0;
 
                             return (
                               <tr key={material.itemId} className={`${isHave ? 'opacity-50' : ''}`}>
@@ -455,6 +485,16 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
                                     <option value="buy">💰 購買</option>
                                     <option value="have">✓ 已有</option>
                                   </select>
+                                </td>
+                                <td className="px-3 py-2">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    value={purchaseQty}
+                                    onChange={(e) => updatePurchaseQty(material.itemId, Math.max(0, parseInt(e.target.value) || 0))}
+                                    disabled={!isBuy}
+                                    className="w-20 px-2 py-1 text-right text-sm border rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 disabled:opacity-50"
+                                  />
                                 </td>
                                 <td className="px-3 py-2">
                                   <input
