@@ -311,6 +311,45 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
     };
   }, [baseMaterials, intermediateMaterials, costEntries, effectiveAmounts]);
 
+  // 計算每項裝備的單位製作成本
+  const itemCraftCosts = useMemo(() => {
+    const costMap = new Map<number, { craftCost: number; quantity: number }>();
+    
+    // 如果沒有成本資料，返回空
+    if (totalCost === 0) return costMap;
+    
+    // 初始化每個裝備的成本
+    items.forEach(item => {
+      costMap.set(item.itemId, { craftCost: 0, quantity: item.quantity });
+    });
+    
+    // 根據每個材料的 usedBy 資訊分攤成本
+    materials.forEach(material => {
+      const entry = costEntries.get(material.itemId);
+      if (!entry) return;
+      
+      // 獲取材料的單價
+      const unitPrice = entry.unitPrice;
+      if (unitPrice <= 0) return;
+      
+      // 根據 usedBy 分攤成本到各個裝備
+      material.usedBy.forEach(usage => {
+        const itemCost = costMap.get(usage.itemId);
+        if (itemCost) {
+          // 計算這個材料對這個裝備的成本貢獻
+          // 如果是基礎材料且選擇購買，則計算成本
+          // 如果是中間產物且選擇購買，則計算成本
+          const shouldCount = entry.possession === 'buy';
+          if (shouldCount) {
+            itemCost.craftCost += unitPrice * usage.totalAmount;
+          }
+        }
+      });
+    });
+    
+    return costMap;
+  }, [items, materials, costEntries, totalCost]);
+
   if (items.length === 0) {
     return (
       <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
@@ -624,6 +663,88 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
                     </span>
                   </div>
                 </div>
+
+                {/* 裝備成本比較 */}
+                {items.some(item => item.marketPrice !== undefined && item.marketPrice > 0) && (
+                  <div className="mt-6">
+                    <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-3">
+                      📊 裝備成本比較
+                    </h4>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 dark:bg-gray-800">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-400">裝備</th>
+                            <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">數量</th>
+                            <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">製作成本</th>
+                            <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">市價</th>
+                            <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">差額</th>
+                            <th className="px-3 py-2 text-center font-medium text-gray-600 dark:text-gray-400">建議</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                          {items.map(item => {
+                            const costInfo = itemCraftCosts.get(item.itemId);
+                            const craftCost = costInfo?.craftCost || 0;
+                            const unitCraftCost = item.quantity > 0 ? Math.ceil(craftCost / item.quantity) : 0;
+                            const marketPrice = item.marketPrice || 0;
+                            const hasMarketPrice = marketPrice > 0;
+                            const hasCraftCost = unitCraftCost > 0;
+                            const diff = hasMarketPrice && hasCraftCost ? marketPrice - unitCraftCost : 0;
+                            const suggestion = !hasMarketPrice ? '-' : 
+                              !hasCraftCost ? '請輸入材料單價' :
+                              diff > 0 ? '製作較划算' : 
+                              diff < 0 ? '購買較划算' : '相同';
+                            const suggestionColor = diff > 0 ? 'text-green-600 dark:text-green-400' : 
+                              diff < 0 ? 'text-orange-600 dark:text-orange-400' : 
+                              'text-gray-500';
+
+                            return (
+                              <tr key={item.itemId}>
+                                <td className="px-3 py-2">
+                                  <div className="flex items-center gap-2">
+                                    {item.iconUrl && (
+                                      <img src={item.iconUrl} alt={item.itemName} className="w-6 h-6" />
+                                    )}
+                                    <span className="truncate max-w-[150px]">{item.itemName}</span>
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2 text-right">{item.quantity}</td>
+                                <td className="px-3 py-2 text-right">
+                                  {hasCraftCost ? (
+                                    <span title={`總計: ${craftCost.toLocaleString()} Gil`}>
+                                      {unitCraftCost.toLocaleString()}
+                                    </span>
+                                  ) : (
+                                    <span className="text-gray-400">-</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                  {hasMarketPrice ? marketPrice.toLocaleString() : <span className="text-gray-400">未設定</span>}
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                  {hasMarketPrice && hasCraftCost ? (
+                                    <span className={diff > 0 ? 'text-green-600 dark:text-green-400' : diff < 0 ? 'text-red-600 dark:text-red-400' : ''}>
+                                      {diff > 0 ? '+' : ''}{diff.toLocaleString()}
+                                    </span>
+                                  ) : (
+                                    <span className="text-gray-400">-</span>
+                                  )}
+                                </td>
+                                <td className={`px-3 py-2 text-center font-medium ${suggestionColor}`}>
+                                  {suggestion}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="mt-2 text-xs text-gray-500">
+                      ※ 製作成本為單件製作的材料費用，差額為「市價 - 製作成本」，正值表示製作更划算
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -643,31 +764,66 @@ function MaterialCard({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation(); // 防止觸發展開/收合
+    try {
+      await navigator.clipboard.writeText(material.itemName);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      console.error('複製失敗:', err);
+    }
+  };
+
   return (
     <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-3 text-left"
-      >
-        {material.iconUrl && (
-          <img
-            src={material.iconUrl}
-            alt={material.itemName}
-            className="w-8 h-8 rounded"
-          />
-        )}
-        <div className="flex-1 min-w-0">
-          <p className="font-medium text-gray-900 dark:text-white truncate">
-            {material.itemName}
-          </p>
-          <p className="text-sm text-gray-500">
-            需要 <span className="font-semibold text-blue-600 dark:text-blue-400">{material.totalAmount}</span> 個
-          </p>
-        </div>
-        <span className="text-gray-400">
-          {expanded ? '▲' : '▼'}
-        </span>
-      </button>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onToggle}
+          className="flex-1 flex items-center gap-3 text-left min-w-0"
+        >
+          {material.iconUrl && (
+            <img
+              src={material.iconUrl}
+              alt={material.itemName}
+              className="w-8 h-8 rounded"
+            />
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-gray-900 dark:text-white truncate">
+              {material.itemName}
+            </p>
+            <p className="text-sm text-gray-500">
+              需要 <span className="font-semibold text-blue-600 dark:text-blue-400">{material.totalAmount}</span> 個
+            </p>
+          </div>
+          <span className="text-gray-400">
+            {expanded ? '▲' : '▼'}
+          </span>
+        </button>
+        {/* 複製按鈕 */}
+        <button
+          onClick={handleCopy}
+          className={`p-1.5 rounded transition-colors ${
+            copied 
+              ? 'text-green-500 bg-green-100 dark:bg-green-900/30' 
+              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-200 dark:hover:bg-gray-700'
+          }`}
+          title={copied ? '已複製！' : '複製材料名稱'}
+        >
+          {copied ? (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+          )}
+        </button>
+      </div>
 
       {/* 展開詳情 */}
       {expanded && material.usedBy.length > 0 && (

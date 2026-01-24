@@ -21,6 +21,7 @@ export interface CraftingListItem {
   quantity: number;       // 需要的數量
   completed: number;      // 已完成的數量
   recipeId?: number;      // 配方 ID（如果有的話）
+  marketPrice?: number;   // 市場價格
 }
 
 // 儲存的 key
@@ -193,6 +194,23 @@ export function useCraftingLists() {
     saveLists(updated);
   }, [lists, saveLists]);
 
+  // 更新市場價格
+  const updateItemMarketPrice = useCallback((listId: string, itemId: number, marketPrice: number | undefined) => {
+    const updated = lists.map(list => {
+      if (list.id === listId) {
+        const newItems = list.items.map(item => {
+          if (item.itemId === itemId) {
+            return { ...item, marketPrice };
+          }
+          return item;
+        });
+        return { ...list, items: newItems, updatedAt: new Date().toISOString() };
+      }
+      return list;
+    });
+    saveLists(updated);
+  }, [lists, saveLists]);
+
   // 清空清單物品
   const clearItems = useCallback((listId: string) => {
     const updated = lists.map(list => {
@@ -217,6 +235,7 @@ export function useCraftingLists() {
     removeItem,
     updateItemQuantity,
     updateItemCompleted,
+    updateItemMarketPrice,
     clearItems,
     reload: loadLists,
   };

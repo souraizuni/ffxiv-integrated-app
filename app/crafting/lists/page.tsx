@@ -19,6 +19,7 @@ export default function CraftingListsPage() {
     removeItem,
     updateItemQuantity,
     updateItemCompleted,
+    updateItemMarketPrice,
     clearItems,
   } = useCraftingLists();
 
@@ -463,6 +464,25 @@ export default function CraftingListsPage() {
                                 >
                                   +
                                 </button>
+                              </div>
+                            </div>
+
+                            {/* 市場價格 */}
+                            <div className="flex flex-col items-center gap-2">
+                              <span className="text-xs text-gray-500">市價</span>
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  placeholder="輸入"
+                                  value={item.marketPrice ?? ''}
+                                  onChange={(e) => {
+                                    const val = e.target.value ? parseInt(e.target.value) : undefined;
+                                    updateItemMarketPrice(selectedList.id, item.itemId, val && val >= 0 ? val : undefined);
+                                  }}
+                                  className="w-24 text-center px-2 py-1 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 text-sm"
+                                />
+                                <span className="text-xs text-gray-400">G</span>
                               </div>
                             </div>
 
