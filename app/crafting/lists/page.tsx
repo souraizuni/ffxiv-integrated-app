@@ -64,12 +64,18 @@ export default function CraftingListsPage() {
     return () => clearTimeout(timer);
   }, [searchQuery, handleSearch]);
 
+  // 建構圖示 URL（統一格式）
+  const buildIconUrl = (itemId: number): string => {
+    const folder = Math.floor(itemId / 1000) * 1000;
+    return `https://cafemaker.wakingsands.com/i/${folder}/${String(itemId).padStart(6, '0')}.png`;
+  };
+
   // 新增物品到清單
   const handleAddItem = async (recipe: RecipeInfo) => {
     if (!selectedListId) return;
 
     // 建構圖示 URL
-    const iconUrl = `https://cafemaker.wakingsands.com/i/${String(recipe.item_id).padStart(6, '0').slice(0, 3)}000/${String(recipe.item_id).padStart(6, '0')}.png`;
+    const iconUrl = buildIconUrl(recipe.item_id);
     
     addItem(
       selectedListId,
@@ -299,7 +305,7 @@ export default function CraftingListsPage() {
                           className="w-full flex items-center gap-3 p-3 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left border-b border-gray-100 dark:border-gray-700 last:border-0"
                         >
                           <img
-                            src={`https://cafemaker.wakingsands.com/i/${String(recipe.item_id).padStart(6, '0').slice(0, 3)}000/${String(recipe.item_id).padStart(6, '0')}.png`}
+                            src={buildIconUrl(recipe.item_id)}
                             alt={recipe.item_name}
                             className="w-10 h-10 rounded"
                             onError={(e) => {
