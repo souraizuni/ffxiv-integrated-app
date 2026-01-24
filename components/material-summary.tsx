@@ -7,13 +7,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import type { CraftingListItem } from '@/hooks/use-crafting-lists';
 import type { Recipe, FlattenedMaterial, Item } from '@/types';
-import { getRecipeByItemId, getItemInfo } from '@/lib/recipe-datasource';
-
-// ---- 建構圖示 URL（統一格式）----
-function buildIconUrl(itemId: number): string {
-  const folder = Math.floor(itemId / 1000) * 1000;
-  return `https://cafemaker.wakingsands.com/i/${folder}/${String(itemId).padStart(6, '0')}.png`;
-}
+import { getRecipeByItemId } from '@/lib/recipe-datasource';
+import { fetchItem } from '@/hooks/use-xivapi';
 
 // ---- 聚合材料資料 ----
 export interface AggregatedMaterial {
@@ -28,12 +23,18 @@ export interface AggregatedMaterial {
     amountPerUnit: number;
     totalAmount: number;
   }>;
+  // 子材料（製作此物品需要的材料）- 用於成本計算時減少基礎材料需求
+  childMaterials?: Array<{
+    itemId: number;
+    amountPerCraft: number;  // 每製作一個需要多少
+  }>;
+  craftYield?: number;  // 每次製作產出數量
 }
 
 // ---- 成本條目 ----
 interface MaterialCostEntry {
   unitPrice: number;
-  possession: 'buy' | 'have';
+  possession: 'buy' | 'have' | 'craft';  // 購買 / 已擁有 / 自己製作
 }
 
 interface MaterialSummaryProps {
@@ -57,37 +58,60 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
   const [costEntries, setCostEntries] = useState<Map<number, MaterialCostEntry>>(new Map());
   const [showCostCalculator, setShowCostCalculator] = useState(false);
   
-  // 快取計算結果
+  // 快取計算結果（使用 module-level 快取確保跨渲染保持）
   const cacheRef = useRef<Map<string, AggregatedMaterial[]>>(new Map());
-  const lastCacheKeyRef = useRef<string>('');
+  const lastCalculatedKeyRef = useRef<string>('');
+  const isCalculatingRef = useRef<boolean>(false);
+
+  // 計算 cache key（用 useMemo 確保穩定）
+  const cacheKey = useMemo(() => generateCacheKey(items), [items]);
 
   // 計算所有物品的材料（帶快取）
   useEffect(() => {
     if (items.length === 0) {
       setMaterials([]);
+      lastCalculatedKeyRef.current = '';
       return;
     }
 
-    const cacheKey = generateCacheKey(items);
-    
-    // 如果快取中有結果，直接使用
-    if (cacheRef.current.has(cacheKey) && lastCacheKeyRef.current === cacheKey) {
-      return; // 已有快取，不需重新計算
+    // 如果這個 key 已經計算過，直接使用快取
+    if (lastCalculatedKeyRef.current === cacheKey) {
+      const cached = cacheRef.current.get(cacheKey);
+      if (cached && cached.length > 0) {
+        // 快取仍有效，不需重新計算
+        return;
+      }
+    }
+
+    // 檢查是否正在計算中（避免重複請求）
+    if (isCalculatingRef.current) {
+      return;
+    }
+
+    // 從快取中取得結果（可能是之前計算過的）
+    const cached = cacheRef.current.get(cacheKey);
+    if (cached) {
+      setMaterials(cached);
+      lastCalculatedKeyRef.current = cacheKey;
+      // 初始化成本條目（中間產物預設為「自製」，基礎材料預設為「購買」）
+      const newCostEntries = new Map<number, MaterialCostEntry>();
+      cached.forEach(m => {
+        newCostEntries.set(m.itemId, { 
+          unitPrice: 0, 
+          possession: m.isBaseMaterial ? 'buy' : 'craft'
+        });
+      });
+      setCostEntries(newCostEntries);
+      return;
     }
 
     calculateMaterials(cacheKey);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items]);
+  }, [cacheKey]);
 
-  const calculateMaterials = async (cacheKey: string) => {
-    // 檢查快取
-    const cached = cacheRef.current.get(cacheKey);
-    if (cached) {
-      setMaterials(cached);
-      lastCacheKeyRef.current = cacheKey;
-      return;
-    }
-
+  const calculateMaterials = async (key: string) => {
+    // 設置計算中標記
+    isCalculatingRef.current = true;
     setIsLoading(true);
     setError(null);
 
@@ -126,15 +150,18 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
       });
 
       // 儲存到快取
-      cacheRef.current.set(cacheKey, sortedMaterials);
-      lastCacheKeyRef.current = cacheKey;
+      cacheRef.current.set(key, sortedMaterials);
+      lastCalculatedKeyRef.current = key;
       
       setMaterials(sortedMaterials);
       
-      // 初始化成本條目
+      // 初始化成本條目（中間產物預設為「自製」，基礎材料預設為「購買」）
       const newCostEntries = new Map<number, MaterialCostEntry>();
       sortedMaterials.forEach(m => {
-        newCostEntries.set(m.itemId, { unitPrice: 0, possession: 'buy' });
+        newCostEntries.set(m.itemId, { 
+          unitPrice: 0, 
+          possession: m.isBaseMaterial ? 'buy' : 'craft'  // 中間產物預設自製
+        });
       });
       setCostEntries(newCostEntries);
     } catch (e) {
@@ -142,6 +169,7 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
       setError(e instanceof Error ? e.message : '計算材料時發生錯誤');
     } finally {
       setIsLoading(false);
+      isCalculatingRef.current = false;
     }
   };
 
@@ -157,8 +185,8 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
     });
   }, []);
 
-  // 更新已擁有狀態
-  const updatePossession = useCallback((itemId: number, possession: 'buy' | 'have') => {
+  // 更新擁有狀態（基礎材料：購買/已擁有，中間產物：購買/已擁有/自己製作）
+  const updatePossession = useCallback((itemId: number, possession: 'buy' | 'have' | 'craft') => {
     setCostEntries(prev => {
       const newMap = new Map(prev);
       const entry = newMap.get(itemId);
@@ -193,17 +221,67 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
     [materials]
   );
 
-  // 計算總成本（僅基礎材料）
-  const totalCost = useMemo(() => {
-    let cost = 0;
-    baseMaterials.forEach(m => {
-      const entry = costEntries.get(m.itemId);
-      if (entry && entry.possession === 'buy') {
-        cost += entry.unitPrice * m.totalAmount;
+  // 計算有效需求量（考慮購買中間產物後減少的基礎材料）
+  const effectiveAmounts = useMemo(() => {
+    const amounts = new Map<number, number>();
+    
+    // 初始化所有材料的需求量
+    materials.forEach(m => {
+      amounts.set(m.itemId, m.totalAmount);
+    });
+    
+    // 計算購買中間產物後減少的子材料需求
+    intermediateMaterials.forEach(intermediate => {
+      const entry = costEntries.get(intermediate.itemId);
+      // 如果中間產物選擇「購買」或「已擁有」，則減少其子材料需求
+      if (entry && (entry.possession === 'buy' || entry.possession === 'have')) {
+        const buyAmount = intermediate.totalAmount;
+        const craftYield = intermediate.craftYield || 1;
+        // 購買這麼多中間產物，會減少多少次製作
+        const craftsSaved = Math.ceil(buyAmount / craftYield);
+        
+        // 減少子材料的需求量
+        if (intermediate.childMaterials) {
+          intermediate.childMaterials.forEach(child => {
+            const currentAmount = amounts.get(child.itemId) || 0;
+            const reduction = child.amountPerCraft * craftsSaved;
+            amounts.set(child.itemId, Math.max(0, currentAmount - reduction));
+          });
+        }
       }
     });
-    return cost;
-  }, [baseMaterials, costEntries]);
+    
+    return amounts;
+  }, [materials, intermediateMaterials, costEntries]);
+
+  // 計算總成本（基礎材料 + 購買的中間產物）
+  const { totalCost, baseCost, intermediateCost } = useMemo(() => {
+    let baseCost = 0;
+    let intermediateCost = 0;
+    
+    // 基礎材料成本（使用有效需求量）
+    baseMaterials.forEach(m => {
+      const entry = costEntries.get(m.itemId);
+      const effectiveAmount = effectiveAmounts.get(m.itemId) || 0;
+      if (entry && entry.possession === 'buy' && effectiveAmount > 0) {
+        baseCost += entry.unitPrice * effectiveAmount;
+      }
+    });
+    
+    // 中間產物成本（僅計算選擇購買的）
+    intermediateMaterials.forEach(m => {
+      const entry = costEntries.get(m.itemId);
+      if (entry && entry.possession === 'buy') {
+        intermediateCost += entry.unitPrice * m.totalAmount;
+      }
+    });
+    
+    return {
+      totalCost: baseCost + intermediateCost,
+      baseCost,
+      intermediateCost,
+    };
+  }, [baseMaterials, intermediateMaterials, costEntries, effectiveAmounts]);
 
   if (items.length === 0) {
     return (
@@ -323,76 +401,188 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
             </button>
 
             {showCostCalculator && (
-              <div className="mt-4 space-y-4">
-                {/* 基礎材料成本輸入 */}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 dark:bg-gray-800">
-                      <tr>
-                        <th className="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-400">材料</th>
-                        <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">需求量</th>
-                        <th className="px-3 py-2 text-center font-medium text-gray-600 dark:text-gray-400">狀態</th>
-                        <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">單價</th>
-                        <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">小計</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                      {baseMaterials.map((material) => {
-                        const entry = costEntries.get(material.itemId);
-                        const isHave = entry?.possession === 'have';
-                        const subtotal = isHave ? 0 : (entry?.unitPrice || 0) * material.totalAmount;
+              <div className="mt-4 space-y-6">
+                {/* 說明 */}
+                <div className="text-sm text-gray-500 bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                  <p>💡 提示：選擇「購買」中間產物會自動減少所需的基礎材料數量</p>
+                </div>
 
-                        return (
-                          <tr key={material.itemId} className={`${isHave ? 'opacity-50' : ''}`}>
-                            <td className="px-3 py-2">
-                              <div className="flex items-center gap-2">
-                                {material.iconUrl && (
-                                  <img src={material.iconUrl} alt={material.itemName} className="w-6 h-6" />
-                                )}
-                                <span className="truncate max-w-[120px]">{material.itemName}</span>
-                              </div>
-                            </td>
-                            <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-400">
-                              {material.totalAmount}
-                            </td>
-                            <td className="px-3 py-2 text-center">
-                              <button
-                                onClick={() => updatePossession(material.itemId, isHave ? 'buy' : 'have')}
-                                className={`px-2 py-1 text-xs rounded ${
-                                  isHave 
-                                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
-                                }`}
-                              >
-                                {isHave ? '已擁有' : '需購買'}
-                              </button>
-                            </td>
-                            <td className="px-3 py-2">
-                              <input
-                                type="number"
-                                min={0}
-                                value={entry?.unitPrice || 0}
-                                onChange={(e) => updateUnitPrice(material.itemId, Math.max(0, parseInt(e.target.value) || 0))}
-                                disabled={isHave}
-                                className="w-24 px-2 py-1 text-right text-sm border rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 disabled:opacity-50"
-                              />
-                            </td>
-                            <td className="px-3 py-2 text-right font-medium">
-                              {isHave ? '-' : subtotal.toLocaleString()}
-                            </td>
+                {/* 中間產物成本輸入 */}
+                {intermediateMaterials.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-3">
+                      ⚒️ 中間產物（可選擇購買或自製）
+                    </h4>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 dark:bg-gray-800">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-400">材料</th>
+                            <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">需求量</th>
+                            <th className="px-3 py-2 text-center font-medium text-gray-600 dark:text-gray-400">方式</th>
+                            <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">單價</th>
+                            <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">小計</th>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                          {intermediateMaterials.map((material) => {
+                            const entry = costEntries.get(material.itemId);
+                            const possession = entry?.possession || 'craft';
+                            const isBuy = possession === 'buy';
+                            const isHave = possession === 'have';
+                            const subtotal = isBuy ? (entry?.unitPrice || 0) * material.totalAmount : 0;
+
+                            return (
+                              <tr key={material.itemId} className={`${isHave ? 'opacity-50' : ''}`}>
+                                <td className="px-3 py-2">
+                                  <div className="flex items-center gap-2">
+                                    {material.iconUrl && (
+                                      <img src={material.iconUrl} alt={material.itemName} className="w-6 h-6" />
+                                    )}
+                                    <span className="truncate max-w-[120px]">{material.itemName}</span>
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-400">
+                                  {material.totalAmount}
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                  <select
+                                    value={possession}
+                                    onChange={(e) => updatePossession(material.itemId, e.target.value as 'buy' | 'have' | 'craft')}
+                                    className="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 dark:bg-gray-800"
+                                  >
+                                    <option value="craft">🔨 自製</option>
+                                    <option value="buy">💰 購買</option>
+                                    <option value="have">✓ 已有</option>
+                                  </select>
+                                </td>
+                                <td className="px-3 py-2">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    value={entry?.unitPrice || 0}
+                                    onChange={(e) => updateUnitPrice(material.itemId, Math.max(0, parseInt(e.target.value) || 0))}
+                                    disabled={!isBuy}
+                                    className="w-24 px-2 py-1 text-right text-sm border rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 disabled:opacity-50"
+                                  />
+                                </td>
+                                <td className="px-3 py-2 text-right font-medium">
+                                  {isBuy ? subtotal.toLocaleString() : '-'}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* 基礎材料成本輸入 */}
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-3">
+                    🪨 基礎材料
+                  </h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 dark:bg-gray-800">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-400">材料</th>
+                          <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">原需求</th>
+                          <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">實際需求</th>
+                          <th className="px-3 py-2 text-center font-medium text-gray-600 dark:text-gray-400">狀態</th>
+                          <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">單價</th>
+                          <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">小計</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                        {baseMaterials.map((material) => {
+                          const entry = costEntries.get(material.itemId);
+                          const isHave = entry?.possession === 'have';
+                          const effectiveAmount = effectiveAmounts.get(material.itemId) || 0;
+                          const isReduced = effectiveAmount < material.totalAmount;
+                          const subtotal = isHave ? 0 : (entry?.unitPrice || 0) * effectiveAmount;
+
+                          return (
+                            <tr key={material.itemId} className={`${isHave || effectiveAmount === 0 ? 'opacity-50' : ''}`}>
+                              <td className="px-3 py-2">
+                                <div className="flex items-center gap-2">
+                                  {material.iconUrl && (
+                                    <img src={material.iconUrl} alt={material.itemName} className="w-6 h-6" />
+                                  )}
+                                  <span className="truncate max-w-[120px]">{material.itemName}</span>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 text-right text-gray-400">
+                                <span className={isReduced ? 'line-through' : ''}>
+                                  {material.totalAmount}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <span className={`font-medium ${isReduced ? 'text-green-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-400'}`}>
+                                  {effectiveAmount}
+                                </span>
+                                {isReduced && (
+                                  <span className="ml-1 text-xs text-green-500">
+                                    (-{material.totalAmount - effectiveAmount})
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                <button
+                                  onClick={() => updatePossession(material.itemId, isHave ? 'buy' : 'have')}
+                                  className={`px-2 py-1 text-xs rounded ${
+                                    isHave 
+                                      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                                      : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                                  }`}
+                                >
+                                  {isHave ? '已擁有' : '需購買'}
+                                </button>
+                              </td>
+                              <td className="px-3 py-2">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={entry?.unitPrice || 0}
+                                  onChange={(e) => updateUnitPrice(material.itemId, Math.max(0, parseInt(e.target.value) || 0))}
+                                  disabled={isHave || effectiveAmount === 0}
+                                  className="w-24 px-2 py-1 text-right text-sm border rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 disabled:opacity-50"
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-right font-medium">
+                                {isHave || effectiveAmount === 0 ? '-' : subtotal.toLocaleString()}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
 
                 {/* 成本總計 */}
-                <div className="flex justify-between items-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                  <span className="font-semibold text-gray-700 dark:text-gray-300">基礎材料總成本</span>
-                  <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                    {totalCost.toLocaleString()} Gil
-                  </span>
+                <div className="space-y-2">
+                  {intermediateCost > 0 && (
+                    <div className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">中間產物購買成本</span>
+                      <span className="font-medium text-gray-700 dark:text-gray-300">
+                        {intermediateCost.toLocaleString()} Gil
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                    <span className="text-sm text-gray-600 dark:text-gray-400">基礎材料購買成本</span>
+                    <span className="font-medium text-gray-700 dark:text-gray-300">
+                      {baseCost.toLocaleString()} Gil
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                    <span className="font-semibold text-gray-700 dark:text-gray-300">總成本</span>
+                    <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                      {totalCost.toLocaleString()} Gil
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
@@ -488,14 +678,26 @@ async function calculateItemMaterials(
     const ingredientRecipe = await getRecipeByItemId(ingredient.itemId);
     const isBaseMaterial = !ingredientRecipe;
 
-    // 獲取材料名稱
+    // 獲取材料名稱和圖示（從 API 取得正確的圖示 URL）
     let itemName = `Item ${ingredient.itemId}`;
-    let iconUrl = buildIconUrl(ingredient.itemId);
+    let iconUrl: string | undefined;
     try {
-      const itemInfo = await getItemInfo(ingredient.itemId);
+      const itemInfo = await fetchItem(ingredient.itemId);
       itemName = itemInfo.name;
+      iconUrl = itemInfo.iconUrl; // 使用 API 回傳的正確圖示 URL
     } catch {
       // 忽略錯誤
+    }
+
+    // 取得中間產物的子材料資訊（用於成本計算時減少基礎材料需求）
+    let childMaterials: Array<{ itemId: number; amountPerCraft: number }> | undefined;
+    let ingredientCraftYield: number | undefined;
+    if (!isBaseMaterial && ingredientRecipe) {
+      ingredientCraftYield = ingredientRecipe.craftTypeLevel || 1;
+      childMaterials = ingredientRecipe.ingredients.map(ing => ({
+        itemId: ing.itemId,
+        amountPerCraft: ing.amount,
+      }));
     }
 
     // 加入材料清單（基礎材料或指定顯示中間產物）
@@ -528,6 +730,8 @@ async function calculateItemMaterials(
             amountPerUnit: ingredient.amount,
             totalAmount: requiredAmount,
           }],
+          childMaterials,
+          craftYield: ingredientCraftYield,
         });
       }
     }

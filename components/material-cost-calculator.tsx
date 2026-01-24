@@ -21,6 +21,12 @@ interface MaterialCostEntry {
 interface LoadedProductionData {
   multiplier: number;
   entries: MaterialCostEntry[];
+  // 利潤計算相關（可選，舊紀錄可能沒有）
+  profitSettings?: {
+    sellPrice: number;
+    taxRate: number;
+    reserveQty: number;
+  };
 }
 
 interface MaterialCostCalculatorProps {
@@ -76,6 +82,11 @@ export function MaterialCostCalculator({
   // 製作倍數
   const [multiplier, setMultiplier] = useState(1);
 
+  // 利潤計算設定（提升到父元件以便儲存）
+  const [sellPrice, setSellPrice] = useState(0);
+  const [taxRate, setTaxRate] = useState(5);
+  const [reserveQty, setReserveQty] = useState(0);
+
   // 瓶頸分析開關
   const [showBottleneck, setShowBottleneck] = useState(false);
 
@@ -90,6 +101,12 @@ export function MaterialCostCalculator({
         });
         return newMap;
       });
+      // 載入利潤計算設定（如果有的話）
+      if (initialData.profitSettings) {
+        setSellPrice(initialData.profitSettings.sellPrice);
+        setTaxRate(initialData.profitSettings.taxRate);
+        setReserveQty(initialData.profitSettings.reserveQty);
+      }
       onDataLoaded?.();
     }
   }, [initialData, onDataLoaded]);
@@ -475,6 +492,12 @@ export function MaterialCostCalculator({
         costBreakdown,
         entries: filteredEntries,
         materialTree: materialTree ? { itemId: materialTree.itemId, name: (materialTree as any).item?.name } : null,
+        // 利潤計算相關設定
+        profitSettings: {
+          sellPrice,
+          taxRate,
+          reserveQty,
+        },
       } as const;
 
       const key = 'production_records';
@@ -487,7 +510,7 @@ export function MaterialCostCalculator({
       console.error(e);
       alert('儲存失敗');
     }
-  }, [calculations, costBreakdown, costEntries, multiplier, craftYield, materialTree]);
+  }, [calculations, costBreakdown, costEntries, multiplier, craftYield, materialTree, sellPrice, taxRate, reserveQty]);
 
   if (actualMaterials.length === 0) {
     return (
@@ -1046,6 +1069,12 @@ export function MaterialCostCalculator({
         costPerUnit={calculations.costPerUnit}
         totalOutput={calculations.totalOutput}
         totalCost={calculations.totalCost}
+        sellPrice={sellPrice}
+        onSellPriceChange={setSellPrice}
+        taxRate={taxRate}
+        onTaxRateChange={setTaxRate}
+        reserveQty={reserveQty}
+        onReserveQtyChange={setReserveQty}
       />
     </div>
   );
@@ -1056,15 +1085,23 @@ function ProfitCalculator({
   costPerUnit,
   totalOutput,
   totalCost,
+  sellPrice,
+  onSellPriceChange,
+  taxRate,
+  onTaxRateChange,
+  reserveQty,
+  onReserveQtyChange,
 }: {
   costPerUnit: number;
   totalOutput: number;
   totalCost: number;
+  sellPrice: number;
+  onSellPriceChange: (price: number) => void;
+  taxRate: number;
+  onTaxRateChange: (rate: number) => void;
+  reserveQty: number;
+  onReserveQtyChange: (qty: number) => void;
 }) {
-  const [sellPrice, setSellPrice] = useState(0);
-  const [taxRate, setTaxRate] = useState(5);
-  const [reserveQty, setReserveQty] = useState(0); // 保留數量
-
   // 實際可販售數量 = 總產出 - 保留數量
   const sellableOutput = Math.max(0, totalOutput - reserveQty);
   // 保留數量攤提到成本：實際用於銷售的成本 = 總成本 × (可販售 / 總產出)
@@ -1108,7 +1145,7 @@ function ProfitCalculator({
             min={0}
             value={sellPrice || ''}
             onChange={(e) =>
-              setSellPrice(Math.max(0, parseFloat(e.target.value) || 0))
+              onSellPriceChange(Math.max(0, parseFloat(e.target.value) || 0))
             }
             className="w-28 px-2 py-1 text-sm border rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600"
             placeholder="輸入售價"
@@ -1120,7 +1157,7 @@ function ProfitCalculator({
           </label>
           <select
             value={taxRate}
-            onChange={(e) => setTaxRate(parseFloat(e.target.value))}
+            onChange={(e) => onTaxRateChange(parseFloat(e.target.value))}
             className="px-2 py-1 text-sm border rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600"
           >
             <option value={0}>0% (免稅)</option>
@@ -1138,7 +1175,7 @@ function ProfitCalculator({
             max={totalOutput}
             value={reserveQty || ''}
             onChange={(e) =>
-              setReserveQty(Math.min(totalOutput, Math.max(0, parseInt(e.target.value) || 0)))
+              onReserveQtyChange(Math.min(totalOutput, Math.max(0, parseInt(e.target.value) || 0)))
             }
             className="w-20 px-2 py-1 text-sm border rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600"
             placeholder="0"

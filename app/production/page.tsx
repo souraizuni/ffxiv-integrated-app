@@ -23,6 +23,11 @@ type ProductionRecord = {
   costBreakdown: { baseCost: number; craftableCost: number };
   entries: MaterialCostEntry[];
   materialTree: { itemId: number; name: string } | null;
+  profitSettings?: {
+    sellPrice: number;
+    taxRate: number;
+    reserveQty: number;
+  };
 };
 
 export default function ProductionPage() {

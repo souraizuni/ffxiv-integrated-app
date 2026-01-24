@@ -1,12 +1,15 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useCraftingLists } from '@/hooks/use-crafting-lists';
 import { MaterialSummary } from '@/components/material-summary';
 import { searchRecipes } from '@/lib/recipe-datasource';
+import { fetchItem } from '@/hooks/use-xivapi';
 import type { RecipeInfo } from '@/lib/recipe-datasource';
 
 export default function RequirementListsPage() {
+  const router = useRouter();
   const {
     lists,
     selectedList,
@@ -31,8 +34,11 @@ export default function RequirementListsPage() {
   const [searchResults, setSearchResults] = useState<RecipeInfo[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
+  
+  // 圖示 URL 快取
+  const [iconUrls, setIconUrls] = useState<Map<number, string>>(new Map());
 
-  // 搜尋配方
+  // 搜尋配方並取得圖示
   const handleSearch = useCallback(async (query: string) => {
     if (query.length < 1) {
       setSearchResults([]);
@@ -45,7 +51,20 @@ export default function RequirementListsPage() {
 
     try {
       const result = await searchRecipes(query, 1);
-      setSearchResults(result.results.slice(0, 20));
+      const results = result.results.slice(0, 20);
+      setSearchResults(results);
+      
+      // 批量取得圖示 URL（非同步，不阻塞搜尋結果顯示）
+      const newIconUrls = new Map(iconUrls);
+      for (const recipe of results) {
+        if (!newIconUrls.has(recipe.item_id)) {
+          fetchItem(recipe.item_id)
+            .then(item => {
+              setIconUrls(prev => new Map(prev).set(recipe.item_id, item.iconUrl));
+            })
+            .catch(() => {/* 忽略錯誤 */});
+        }
+      }
     } catch (error) {
       console.error('搜尋失敗:', error);
       setSearchResults([]);
@@ -64,31 +83,48 @@ export default function RequirementListsPage() {
     return () => clearTimeout(timer);
   }, [searchQuery, handleSearch]);
 
-  // 建構圖示 URL（統一格式）
-  const buildIconUrl = (itemId: number): string => {
-    const folder = Math.floor(itemId / 1000) * 1000;
-    return `https://cafemaker.wakingsands.com/i/${folder}/${String(itemId).padStart(6, '0')}.png`;
-  };
-
-  // 新增物品到清單
+  // 新增物品到清單（從 API 取得正確的圖示 URL）
   const handleAddItem = async (recipe: RecipeInfo) => {
     if (!selectedListId) return;
 
-    // 建構圖示 URL
-    const iconUrl = buildIconUrl(recipe.item_id);
-    
-    addItem(
-      selectedListId,
-      recipe.item_id,
-      recipe.item_name,
-      iconUrl,
-      recipe.id
-    );
+    try {
+      // 從 Cafemaker API 取得物品資訊（包含正確的圖示 URL）
+      const itemInfo = await fetchItem(recipe.item_id);
+      const iconUrl = itemInfo.iconUrl;
+      
+      addItem(
+        selectedListId,
+        recipe.item_id,
+        recipe.item_name,
+        iconUrl,
+        recipe.id
+      );
+    } catch (error) {
+      console.error('無法取得物品圖示:', error);
+      // 如果取得失敗，仍然新增物品但不帶圖示
+      addItem(
+        selectedListId,
+        recipe.item_id,
+        recipe.item_name,
+        undefined,
+        recipe.id
+      );
+    }
 
     // 清除搜尋
     setSearchQuery('');
     setSearchResults([]);
     setShowSearchResults(false);
+  };
+
+  // 導航到生產指引並載入配方
+  const handleNavigateToCrafting = (itemId: number, itemName: string) => {
+    // 使用 sessionStorage 傳遞資料
+    sessionStorage.setItem('navigate_to_recipe', JSON.stringify({
+      itemId,
+      itemName,
+    }));
+    router.push('/crafting');
   };
 
   // 建立新清單
@@ -298,33 +334,40 @@ export default function RequirementListsPage() {
                           找不到符合的配方
                         </div>
                       )}
-                      {searchResults.map((recipe) => (
-                        <button
-                          key={recipe.id}
-                          onClick={() => handleAddItem(recipe)}
-                          className="w-full flex items-center gap-3 p-3 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left border-b border-gray-100 dark:border-gray-700 last:border-0"
-                        >
-                          <img
-                            src={buildIconUrl(recipe.item_id)}
-                            alt={recipe.item_name}
-                            className="w-10 h-10 rounded"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display = 'none';
-                            }}
-                          />
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-gray-900 dark:text-white truncate">
-                              {recipe.item_name}
+                      {searchResults.map((recipe) => {
+                        const iconUrl = iconUrls.get(recipe.item_id);
+                        return (
+                          <button
+                            key={recipe.id}
+                            onClick={() => handleAddItem(recipe)}
+                            className="w-full flex items-center gap-3 p-3 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left border-b border-gray-100 dark:border-gray-700 last:border-0"
+                          >
+                            {iconUrl ? (
+                              <img
+                                src={iconUrl}
+                                alt={recipe.item_name}
+                                className="w-10 h-10 rounded"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = 'none';
+                                }}
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-gray-900 dark:text-white truncate">
+                                {recipe.item_name}
+                              </div>
+                              <div className="text-sm text-gray-500 flex items-center gap-2">
+                                <span>{recipe.job}</span>
+                                <span>•</span>
+                                <span>Lv.{recipe.rlv}</span>
+                              </div>
                             </div>
-                            <div className="text-sm text-gray-500 flex items-center gap-2">
-                              <span>{recipe.job}</span>
-                              <span>•</span>
-                              <span>Lv.{recipe.rlv}</span>
-                            </div>
-                          </div>
-                          <span className="text-blue-500 text-sm">+ 新增</span>
-                        </button>
-                      ))}
+                            <span className="text-blue-500 text-sm">+ 新增</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -382,23 +425,27 @@ export default function RequirementListsPage() {
                             key={item.id}
                             className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
                           >
-                            {/* 物品圖示 */}
-                            {item.iconUrl && (
-                              <img
-                                src={item.iconUrl}
-                                alt={item.itemName}
-                                className="w-12 h-12 rounded"
-                                onError={(e) => {
-                                  (e.target as HTMLImageElement).style.display = 'none';
-                                }}
-                              />
-                            )}
-
-                            {/* 物品名稱 */}
-                            <div className="flex-1 min-w-0">
-                              <h4 className="font-semibold text-gray-900 dark:text-white truncate">
-                                {item.itemName}
-                              </h4>
+                            {/* 物品圖示和名稱（可點擊導航到生產指引） */}
+                            <button
+                              onClick={() => handleNavigateToCrafting(item.itemId, item.itemName)}
+                              className="flex items-center gap-3 flex-1 min-w-0 text-left hover:opacity-80 transition-opacity group"
+                              title="點擊查看生產指引"
+                            >
+                              {item.iconUrl && (
+                                <img
+                                  src={item.iconUrl}
+                                  alt={item.itemName}
+                                  className="w-12 h-12 rounded"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).style.display = 'none';
+                                  }}
+                                />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <h4 className="font-semibold text-gray-900 dark:text-white truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                                  {item.itemName}
+                                  <span className="ml-2 text-xs text-gray-400 group-hover:text-blue-400">→ 生產指引</span>
+                                </h4>
                               <div className="mt-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
                                 <div
                                   className={`h-full transition-all ${
@@ -407,10 +454,11 @@ export default function RequirementListsPage() {
                                   style={{ width: `${Math.min(100, (item.completed / item.quantity) * 100)}%` }}
                                 />
                               </div>
-                              <p className="text-xs text-gray-500 mt-1">
-                                完成: {item.completed} / {item.quantity}
-                              </p>
-                            </div>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  完成: {item.completed} / {item.quantity}
+                                </p>
+                              </div>
+                            </button>
 
                             {/* 數量控制 */}
                             <div className="flex flex-col items-center gap-2">

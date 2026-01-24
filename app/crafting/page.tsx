@@ -57,6 +57,21 @@ export default function CraftingPage() {
 
   // 檢查是否有從生產紀錄載入的資料
   useEffect(() => {
+    // 檢查是否從需求清單導航過來
+    const navigateData = sessionStorage.getItem('navigate_to_recipe');
+    if (navigateData) {
+      try {
+        const { itemId, itemName } = JSON.parse(navigateData);
+        loadRecipeByItemId(itemId, itemName);
+        sessionStorage.removeItem('navigate_to_recipe');
+        return; // 優先處理導航請求
+      } catch (e) {
+        console.error('Failed to parse navigate data:', e);
+        sessionStorage.removeItem('navigate_to_recipe');
+      }
+    }
+
+    // 檢查是否有從生產紀錄載入的資料
     const raw = sessionStorage.getItem('loaded_production_record');
     if (raw) {
       try {
