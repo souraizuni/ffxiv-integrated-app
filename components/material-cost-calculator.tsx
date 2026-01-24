@@ -15,6 +15,7 @@ interface MaterialCostEntry {
   source: MaterialSource;
   possession?: MaterialPossession; // 新增：已擁有狀態
   ownedQty?: number; // 已擁有的數量
+  isHQ?: boolean; // 是否為優質材料
 }
 
 interface LoadedProductionData {
@@ -65,6 +66,7 @@ export function MaterialCostCalculator({
           source: m.isBaseMaterial ? 'buy' : 'craft',
           possession: 'buy', // 預設為購買（可切換為已擁有或自製）
           ownedQty: 0,
+          isHQ: false, // 預設非優質
         });
       });
       return map;
@@ -164,6 +166,18 @@ export function MaterialCostCalculator({
       const entry = newMap.get(itemId);
       if (entry) {
         newMap.set(itemId, { ...entry, ownedQty: qty });
+      }
+      return newMap;
+    });
+  }, []);
+
+  // 更新是否為優質材料
+  const updateIsHQ = useCallback((itemId: number, isHQ: boolean) => {
+    setCostEntries((prev) => {
+      const newMap = new Map(prev);
+      const entry = newMap.get(itemId);
+      if (entry) {
+        newMap.set(itemId, { ...entry, isHQ });
       }
       return newMap;
     });
@@ -551,6 +565,9 @@ export function MaterialCostCalculator({
                   <th className="px-3 py-2 text-center font-medium text-gray-600 dark:text-gray-400">
                     來源
                   </th>
+                  <th className="px-3 py-2 text-center font-medium text-gray-600 dark:text-gray-400">
+                    HQ
+                  </th>
                   <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">
                     需求量
                   </th>
@@ -623,6 +640,17 @@ export function MaterialCostCalculator({
                             />
                           )}
                         </div>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <label className="inline-flex items-center gap-1 cursor-pointer" title="優質材料（可用於計算初期品質）">
+                          <input
+                            type="checkbox"
+                            checked={entry?.isHQ || false}
+                            onChange={(e) => updateIsHQ(material.itemId, e.target.checked)}
+                            className="w-4 h-4 rounded border-gray-300 text-amber-500 focus:ring-amber-500"
+                          />
+                          {entry?.isHQ && <span className="text-xs text-amber-500 font-bold">HQ</span>}
+                        </label>
                       </td>
                       <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-400">
                         {isBuying ? (

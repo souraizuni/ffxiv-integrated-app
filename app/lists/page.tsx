@@ -6,7 +6,7 @@ import { MaterialSummary } from '@/components/material-summary';
 import { searchRecipes } from '@/lib/recipe-datasource';
 import type { RecipeInfo } from '@/lib/recipe-datasource';
 
-export default function CraftingListsPage() {
+export default function RequirementListsPage() {
   const {
     lists,
     selectedList,
@@ -136,8 +136,8 @@ export default function CraftingListsPage() {
       {/* 標題區 */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold">📋 製作清單</h1>
-          <p className="text-gray-500 mt-1">管理您的製作項目與材料需求</p>
+          <h1 className="text-3xl font-bold">📝 需求清單</h1>
+          <p className="text-gray-500 mt-1">建立製作清單，統計所需材料總覽</p>
         </div>
         <button
           onClick={() => setShowNewListForm(true)}
@@ -155,7 +155,7 @@ export default function CraftingListsPage() {
           <div className="flex gap-3">
             <input
               type="text"
-              placeholder="輸入清單名稱（例：7.2 新裝備）"
+              placeholder="輸入清單名稱（例：7.2 新裝備、週製作計畫）"
               value={newListName}
               onChange={(e) => setNewListName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleCreateList()}
@@ -484,9 +484,9 @@ export default function CraftingListsPage() {
           ) : (
             <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
               <div className="text-center py-16 text-gray-500">
-                <div className="text-6xl mb-4">📋</div>
+                <div className="text-6xl mb-4">📝</div>
                 <p className="text-lg mb-2">選擇一個清單開始</p>
-                <p className="text-sm">或建立新的製作清單來追蹤您的製作項目</p>
+                <p className="text-sm">或建立新的需求清單來統計所需材料</p>
               </div>
             </div>
           )}

@@ -7,6 +7,7 @@ const navItems = [
   { href: '/', label: '首頁', icon: '🏠' },
   { href: '/collection', label: '收集追蹤', icon: '📦' },
   { href: '/crafting', label: '生產指引', icon: '🔨' },
+  { href: '/lists', label: '需求清單', icon: '📝' },
   { href: '/production', label: '生產紀錄', icon: '📋' },
   { href: '/gearsets', label: '配裝管理', icon: '👔' },
   // 模擬器功能已整合至生產指引頁面，移除獨立頁面入口
