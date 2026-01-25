@@ -87,7 +87,7 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
             newCostEntries.set(m.itemId, { 
               unitPrice: 0, 
               purchaseQty: m.totalAmount,
-              possession: m.isBaseMaterial ? 'buy' : 'craft'
+              possession: 'buy'  // 預設購買
             });
           });
           setCostEntries(newCostEntries);
@@ -112,7 +112,7 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
         newCostEntries.set(m.itemId, { 
           unitPrice: 0, 
           purchaseQty: m.totalAmount,
-          possession: m.isBaseMaterial ? 'buy' : 'craft'
+          possession: 'buy'  // 預設購買
         });
       });
       setCostEntries(newCostEntries);
@@ -169,13 +169,13 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
       
       setMaterials(sortedMaterials);
       
-      // 初始化成本條目（中間產物預設為「自製」，基礎材料預設為「購買」）
+      // 初始化成本條目（預設為「購買」）
       const newCostEntries = new Map<number, MaterialCostEntry>();
       sortedMaterials.forEach(m => {
         newCostEntries.set(m.itemId, { 
           unitPrice: 0,
           purchaseQty: m.totalAmount,
-          possession: m.isBaseMaterial ? 'buy' : 'craft'  // 中間產物預設自製
+          possession: 'buy'  // 預設購買
         });
       });
       setCostEntries(newCostEntries);
@@ -509,6 +509,7 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
                                       <img src={material.iconUrl} alt={material.itemName} className="w-6 h-6" />
                                     )}
                                     <span className="truncate max-w-[120px]">{material.itemName}</span>
+                                    <CopyButton text={material.itemName} />
                                   </div>
                                 </td>
                                 <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-400">
@@ -590,6 +591,7 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
                                     <img src={material.iconUrl} alt={material.itemName} className="w-6 h-6" />
                                   )}
                                   <span className="truncate max-w-[120px]">{material.itemName}</span>
+                                  <CopyButton text={material.itemName} />
                                 </div>
                               </td>
                               <td className="px-3 py-2 text-right text-gray-400">
@@ -842,6 +844,44 @@ function MaterialCard({
         </div>
       )}
     </div>
+  );
+}
+
+// ---- 複製按鈕元件 ----
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      console.error('複製失敗:', err);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className={`p-1 rounded transition-colors flex-shrink-0 ${
+        copied 
+          ? 'text-green-500 bg-green-100 dark:bg-green-900/30' 
+          : 'text-gray-400 hover:text-gray-600 hover:bg-gray-200 dark:hover:bg-gray-700'
+      }`}
+      title={copied ? '已複製！' : '複製名稱'}
+    >
+      {copied ? (
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+        </svg>
+      ) : (
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+      )}
+    </button>
   );
 }
 
