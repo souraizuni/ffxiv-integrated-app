@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useCraftingLists } from '@/hooks/use-crafting-lists';
 import { MaterialSummary } from '@/components/material-summary';
+import { CopyButton } from '@/components/copy-button';
 import { searchRecipes } from '@/lib/recipe-datasource';
 import type { RecipeInfo } from '@/lib/recipe-datasource';
 
@@ -397,9 +398,12 @@ export default function CraftingListsPage() {
 
                             {/* 物品名稱 */}
                             <div className="flex-1 min-w-0">
-                              <h4 className="font-semibold text-gray-900 dark:text-white truncate">
-                                {item.itemName}
-                              </h4>
+                              <div className="flex items-center gap-2">
+                                <h4 className="font-semibold text-gray-900 dark:text-white truncate">
+                                  {item.itemName}
+                                </h4>
+                                <CopyButton text={item.itemName} size="md" />
+                              </div>
                               <div className="mt-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
                                 <div
                                   className={`h-full transition-all ${
@@ -504,7 +508,7 @@ export default function CraftingListsPage() {
 
               {/* 材料總覽 */}
               {activeTab === 'materials' && (
-                <MaterialSummary items={selectedList.items} />
+                <MaterialSummary items={selectedList.items} listId={selectedList.id} />
               )}
             </div>
           ) : (

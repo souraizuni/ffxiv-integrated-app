@@ -45,6 +45,7 @@ interface MaterialCostEntry {
 
 interface MaterialSummaryProps {
   items: CraftingListItem[];
+  listId?: string;  // 清單 ID，用於儲存成本設定
   onClose?: () => void;
 }
 
@@ -53,7 +54,42 @@ function generateCacheKey(items: CraftingListItem[]): string {
   return items.map(i => `${i.itemId}:${i.quantity}`).sort().join('|');
 }
 
-export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
+// 成本資料儲存 key
+function getCostStorageKey(listId: string): string {
+  return `ffxiv-material-costs-${listId}`;
+}
+
+// 儲存成本資料到 localStorage
+function saveCostEntries(listId: string, entries: Map<number, MaterialCostEntry>): void {
+  try {
+    const data: Record<number, MaterialCostEntry> = {};
+    entries.forEach((entry, itemId) => {
+      data[itemId] = entry;
+    });
+    localStorage.setItem(getCostStorageKey(listId), JSON.stringify(data));
+  } catch (e) {
+    console.error('儲存成本資料失敗:', e);
+  }
+}
+
+// 從 localStorage 載入成本資料
+function loadCostEntries(listId: string): Map<number, MaterialCostEntry> | null {
+  try {
+    const raw = localStorage.getItem(getCostStorageKey(listId));
+    if (!raw) return null;
+    const data = JSON.parse(raw) as Record<number, MaterialCostEntry>;
+    const map = new Map<number, MaterialCostEntry>();
+    Object.entries(data).forEach(([key, entry]) => {
+      map.set(Number(key), entry);
+    });
+    return map;
+  } catch (e) {
+    console.error('載入成本資料失敗:', e);
+    return null;
+  }
+}
+
+export function MaterialSummary({ items, listId, onClose }: MaterialSummaryProps) {
   const [materials, setMaterials] = useState<AggregatedMaterial[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,9 +99,37 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
   // 成本計算狀態
   const [costEntries, setCostEntries] = useState<Map<number, MaterialCostEntry>>(new Map());
   const [showCostCalculator, setShowCostCalculator] = useState(false);
+  const [hasSavedData, setHasSavedData] = useState(false);  // 是否有儲存的資料
 
   // 計算 cache key（用 useMemo 確保穩定）
   const cacheKey = useMemo(() => generateCacheKey(items), [items]);
+
+  // 初始化成本條目（合併已儲存的資料）
+  const initCostEntries = useCallback((materialList: AggregatedMaterial[]) => {
+    const savedEntries = listId ? loadCostEntries(listId) : null;
+    const newCostEntries = new Map<number, MaterialCostEntry>();
+    
+    materialList.forEach(m => {
+      const saved = savedEntries?.get(m.itemId);
+      if (saved) {
+        // 使用已儲存的資料，但更新 purchaseQty 如果需求量變了
+        newCostEntries.set(m.itemId, {
+          ...saved,
+          purchaseQty: saved.purchaseQty > 0 ? saved.purchaseQty : m.totalAmount,
+        });
+      } else {
+        // 新材料，使用預設值
+        newCostEntries.set(m.itemId, { 
+          unitPrice: 0, 
+          purchaseQty: m.totalAmount,
+          possession: 'buy'
+        });
+      }
+    });
+    
+    setCostEntries(newCostEntries);
+    setHasSavedData(savedEntries !== null && savedEntries.size > 0);
+  }, [listId]);
 
   // 計算所有物品的材料（帶快取）
   useEffect(() => {
@@ -81,16 +145,7 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
         // 確保 materials 已設定（元件重新掛載時需要）
         if (materials.length === 0) {
           setMaterials(cached);
-          // 初始化成本條目
-          const newCostEntries = new Map<number, MaterialCostEntry>();
-          cached.forEach(m => {
-            newCostEntries.set(m.itemId, { 
-              unitPrice: 0, 
-              purchaseQty: m.totalAmount,
-              possession: 'buy'  // 預設購買
-            });
-          });
-          setCostEntries(newCostEntries);
+          initCostEntries(cached);
         }
         return;
       }
@@ -106,16 +161,7 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
     if (cached) {
       setMaterials(cached);
       lastCalculatedCacheKey = cacheKey;
-      // 初始化成本條目
-      const newCostEntries = new Map<number, MaterialCostEntry>();
-      cached.forEach(m => {
-        newCostEntries.set(m.itemId, { 
-          unitPrice: 0, 
-          purchaseQty: m.totalAmount,
-          possession: 'buy'  // 預設購買
-        });
-      });
-      setCostEntries(newCostEntries);
+      initCostEntries(cached);
       return;
     }
 
@@ -169,16 +215,8 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
       
       setMaterials(sortedMaterials);
       
-      // 初始化成本條目（預設為「購買」）
-      const newCostEntries = new Map<number, MaterialCostEntry>();
-      sortedMaterials.forEach(m => {
-        newCostEntries.set(m.itemId, { 
-          unitPrice: 0,
-          purchaseQty: m.totalAmount,
-          possession: 'buy'  // 預設購買
-        });
-      });
-      setCostEntries(newCostEntries);
+      // 初始化成本條目（嘗試載入已儲存的資料）
+      initCostEntries(sortedMaterials);
     } catch (e) {
       console.error('計算材料失敗:', e);
       setError(e instanceof Error ? e.message : '計算材料時發生錯誤');
@@ -187,6 +225,13 @@ export function MaterialSummary({ items, onClose }: MaterialSummaryProps) {
       isCalculating = false;
     }
   };
+
+  // 當 costEntries 變更時自動儲存到 localStorage
+  useEffect(() => {
+    if (listId && costEntries.size > 0) {
+      saveCostEntries(listId, costEntries);
+    }
+  }, [listId, costEntries]);
 
   // 更新單價
   const updateUnitPrice = useCallback((itemId: number, price: number) => {

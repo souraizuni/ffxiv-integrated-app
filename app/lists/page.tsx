@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCraftingLists } from '@/hooks/use-crafting-lists';
 import { MaterialSummary } from '@/components/material-summary';
+import { CopyButton } from '@/components/copy-button';
 import { searchRecipes } from '@/lib/recipe-datasource';
 import { fetchItem } from '@/hooks/use-xivapi';
 import type { RecipeInfo } from '@/lib/recipe-datasource';
@@ -464,10 +465,13 @@ export default function RequirementListsPage() {
                                 />
                               )}
                               <div className="flex-1 min-w-0">
-                                <h4 className="font-semibold text-gray-900 dark:text-white truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">
-                                  {item.itemName}
-                                  <span className="ml-2 text-xs text-gray-400 group-hover:text-blue-400">→ 生產指引</span>
-                                </h4>
+                                <div className="flex items-center gap-2">
+                                  <h4 className="font-semibold text-gray-900 dark:text-white truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                                    {item.itemName}
+                                  </h4>
+                                  <CopyButton text={item.itemName} size="md" />
+                                  <span className="text-xs text-gray-400 group-hover:text-blue-400">→ 生產指引</span>
+                                </div>
                               <div className="mt-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
                                 <div
                                   className={`h-full transition-all ${
@@ -573,7 +577,7 @@ export default function RequirementListsPage() {
 
               {/* 材料總覽 */}
               {activeTab === 'materials' && (
-                <MaterialSummary items={selectedList.items} />
+                <MaterialSummary items={selectedList.items} listId={selectedList.id} />
               )}
             </div>
           ) : (
