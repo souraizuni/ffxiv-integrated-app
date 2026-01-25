@@ -49,9 +49,9 @@ interface MaterialSummaryProps {
   onClose?: () => void;
 }
 
-// 快取 key 產生器
+// 快取 key 產生器（包含已完成數量）
 function generateCacheKey(items: CraftingListItem[]): string {
-  return items.map(i => `${i.itemId}:${i.quantity}`).sort().join('|');
+  return items.map(i => `${i.itemId}:${i.quantity}:${i.completed}`).sort().join('|');
 }
 
 // 成本資料儲存 key
@@ -180,6 +180,14 @@ export function MaterialSummary({ items, listId, onClose }: MaterialSummaryProps
 
       // 為每個清單物品獲取配方和材料（始終計算包含中間產物的完整樹）
       for (const listItem of items) {
+        // 計算尚未完成的數量
+        const remainingQty = Math.max(0, listItem.quantity - listItem.completed);
+        
+        // 如果已全部完成，跳過此裝備
+        if (remainingQty === 0) {
+          continue;
+        }
+        
         const recipe = await getRecipeByItemId(listItem.itemId);
         
         if (!recipe) {
@@ -187,10 +195,10 @@ export function MaterialSummary({ items, listId, onClose }: MaterialSummaryProps
           continue;
         }
 
-        // 遞歸計算材料（考慮物品數量）- 始終包含中間產物
+        // 遞歸計算材料（使用尚未完成的數量）- 始終包含中間產物
         await calculateItemMaterials(
           recipe,
-          listItem.quantity,
+          remainingQty,
           listItem.itemId,
           listItem.itemName,
           materialMap,
