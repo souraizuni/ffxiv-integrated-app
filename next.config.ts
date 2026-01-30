@@ -20,6 +20,10 @@ const nextConfig: NextConfig = {
   // 生成 trailing slash
   trailingSlash: true,
 
+  // 在開發模式下允許來自 proxy 的 dev 資源請求
+  // allowedDevOrigins 用來允許像是 service.cangle.xyz 對 /_next/* 的請求（防止 dev 模式下的跨域警告）
+  allowedDevOrigins: ['https://service.cangle.xyz','http://service.cangle.xyz'],
+
   // 啟用 WASM 支援 (Webpack)
   webpack: (config, { isServer }) => {
     // 啟用 WebAssembly 實驗性功能
