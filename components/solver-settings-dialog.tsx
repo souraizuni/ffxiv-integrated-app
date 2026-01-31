@@ -18,6 +18,7 @@ import {
   CRAFTER_PRESETS,
 } from '@/data/enhancers';
 import type { Recipe, CrafterStats, RecipeIngredient } from '@/types';
+import type { RaphaelSolverOptions } from '@/lib/simulator/solver';
 
 // ============================================
 // 類型定義
@@ -32,16 +33,8 @@ export interface MaterialWithQuality {
   canBeHQ: boolean;
 }
 
-export interface RaphaelSolverOptions {
-  initialQuality?: number;
-  targetQuality?: number | 'full';
-  useManipulation?: boolean;
-  useHeartAndSoul?: boolean;
-  useQuickInnovation?: boolean;
-  useTrainedEye?: boolean;
-  backloadProgress?: boolean;
-  adversarial?: boolean;
-}
+// Re-export for convenience
+export type { RaphaelSolverOptions } from '@/lib/simulator/solver';
 
 export interface SolverSettingsDialogProps {
   isOpen: boolean;
@@ -145,22 +138,35 @@ export function SolverSettingsDialog({
 
   // 處理應用設定
   const handleApply = useCallback(() => {
+    // 合併增強後的屬性與原始 crafterStats（保留 job, specialist 等）
+    const finalStats: CrafterStats = {
+      ...crafterStats,
+      craftsmanship: enhancedStats.craftsmanship,
+      control: enhancedStats.control,
+      cp: enhancedStats.cp,
+    };
     onApply({
-      crafterStats: enhancedStats,
+      crafterStats: finalStats,
       solverOptions: { ...solverOptions, initialQuality },
     });
     onClose();
-  }, [enhancedStats, solverOptions, initialQuality, onApply, onClose]);
+  }, [crafterStats, enhancedStats, solverOptions, initialQuality, onApply, onClose]);
 
   // 處理開始求解
   const handleSolve = useCallback(() => {
     if (onSolve) {
+      const finalStats: CrafterStats = {
+        ...crafterStats,
+        craftsmanship: enhancedStats.craftsmanship,
+        control: enhancedStats.control,
+        cp: enhancedStats.cp,
+      };
       onSolve({
-        crafterStats: enhancedStats,
+        crafterStats: finalStats,
         solverOptions: { ...solverOptions, initialQuality },
       });
     }
-  }, [enhancedStats, solverOptions, initialQuality, onSolve]);
+  }, [crafterStats, enhancedStats, solverOptions, initialQuality, onSolve]);
 
   if (!isOpen) return null;
 

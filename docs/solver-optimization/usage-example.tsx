@@ -6,7 +6,7 @@
 'use client';
 
 import { useState } from 'react';
-import { SolverSettingsDialog } from './solver-settings-dialog';
+import { SolverSettingsDialog } from '@/components/solver-settings-dialog';
 import type { Recipe, CrafterStats } from '@/types';
 
 // ============================================

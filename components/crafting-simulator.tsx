@@ -17,6 +17,7 @@ import {
 import { raphaelSolver, type RaphaelSolverOptions, type SolverResult } from '@/lib/simulator/solver';
 import { CraftingAnalyzer } from './crafting-analyzer';
 import { MacroExporter } from './macro-exporter';
+import { SolverSettingsDialog } from './solver-settings-dialog';
 import { MEALS, MEDICINES, SOUL_OF_THE_CRAFTER, calculateEnhancedAttributes, getEnhancerEffectText, getEnhancerDisplayName, type Enhancer } from '@/data/enhancers';
 
 // Cookie 鍵名
@@ -83,6 +84,7 @@ export function CraftingSimulator({
   const [solverResult, setSolverResult] = useState<SolverResult | null>(null);
   const [showMacroExport, setShowMacroExport] = useState(false);
   const [showSolverSettings, setShowSolverSettings] = useState(false);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   
   // 食物和藥水設定
   const [selectedMeal, setSelectedMeal] = useState<Enhancer | null>(null);
@@ -730,27 +732,66 @@ export function CraftingSimulator({
               </div>
             )}
             
-            {/* 求解按鈕（總是顯示） */}
-            <button
-              onClick={handleSolve}
-              disabled={isSolving}
-              className="w-full mt-4 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {isSolving ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  求解中...
-                </>
-              ) : (
-                <>
-                  <span>🚀</span>
-                  開始求解
-                </>
-              )}
-            </button>
+            {/* 按鈕區域 */}
+            <div className="flex gap-2 mt-4">
+              {/* 進階設定按鈕 */}
+              <button
+                onClick={() => setShowAdvancedSettings(true)}
+                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 flex items-center justify-center gap-2"
+              >
+                <span>⚙️</span>
+                進階設定
+              </button>
+              
+              {/* 求解按鈕 */}
+              <button
+                onClick={handleSolve}
+                disabled={isSolving}
+                className="flex-1 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isSolving ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    求解中...
+                  </>
+                ) : (
+                  <>
+                    <span>🚀</span>
+                    開始求解
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
+
+      {/* 進階設定彈窗 */}
+      <SolverSettingsDialog
+        isOpen={showAdvancedSettings}
+        onClose={() => setShowAdvancedSettings(false)}
+        recipe={recipe}
+        initialCrafterStats={crafterStats}
+        isSolving={isSolving}
+        onApply={(settings) => {
+          // 更新求解器選項
+          setSolverOptions(prev => ({
+            ...prev,
+            ...settings.solverOptions,
+          }));
+          setShowAdvancedSettings(false);
+        }}
+        onSolve={(settings) => {
+          // 更新設定並開始求解
+          setSolverOptions(prev => ({
+            ...prev,
+            ...settings.solverOptions,
+          }));
+          setShowAdvancedSettings(false);
+          // 延遲執行求解，確保狀態已更新
+          setTimeout(() => handleSolve(), 0);
+        }}
+      />
 
       {/* 模擬器分頁 */}
       {activeTab === 'simulator' && (
