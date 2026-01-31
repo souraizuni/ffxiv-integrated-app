@@ -75,6 +75,11 @@ export function SolverSettingsDialog({
   // 製作者數值狀態
   const [crafterStats, setCrafterStats] = useState<CrafterStats>(initialCrafterStats);
   
+  // 當外部 crafterStats 改變時同步更新
+  useEffect(() => {
+    setCrafterStats(initialCrafterStats);
+  }, [initialCrafterStats]);
+  
   // 初期品質狀態
   const [initialQuality, setInitialQuality] = useState(0);
   const [qualityInputMode, setQualityInputMode] = useState<'manual' | 'materials'>('manual');

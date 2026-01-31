@@ -298,13 +298,38 @@ export async function convertToRecipe(recipeInfo: RecipeInfo): Promise<Recipe> {
   const actualDurability = Math.floor((levelTable.durability * recipeInfo.durability_factor) / 100);
   const actualQuality = Math.floor((levelTable.quality * recipeInfo.quality_factor) / 100);
 
-  const recipeIngredients: RecipeIngredient[] = ingredients
-    .filter(ing => ing.ingredient_id >= 20) // 過濾水晶
-    .map(ing => ({
+  // 過濾水晶並取得每個材料的詳細資訊
+  const filteredIngredients = ingredients.filter(ing => ing.ingredient_id >= 20);
+  
+  // 並行取得所有材料的 item 資訊
+  const itemInfos = await Promise.all(
+    filteredIngredients.map(ing => 
+      getItemInfo(ing.ingredient_id).catch(() => null)
+    )
+  );
+
+  const recipeIngredients: RecipeIngredient[] = filteredIngredients.map((ing, index) => {
+    const itemInfo = itemInfos[index];
+    return {
       itemId: ing.ingredient_id,
       amount: ing.amount,
       isHQ: false,
-    }));
+      item: itemInfo ? {
+        id: itemInfo.id,
+        name: itemInfo.name,
+        name_en: itemInfo.name,
+        name_ja: itemInfo.name,
+        name_zh: itemInfo.name,
+        icon: '',
+        iconUrl: '',
+        itemLevel: itemInfo.level,
+        stackSize: 999,
+        isUntradable: !itemInfo.can_be_hq,
+        categoryId: itemInfo.category_id || 0,
+        categoryName: '',
+      } : undefined,
+    };
+  });
 
   // 轉換收藏品門檻格式
   const isCollectable = collectability !== null && (
@@ -328,6 +353,8 @@ export async function convertToRecipe(recipeInfo: RecipeInfo): Promise<Recipe> {
     canQuickSynth: true,
     canHQ: recipeInfo.can_hq,
     stars: levelTable.stars,
+    // 材料品質係數（用於初期品質計算）
+    materialQualityFactor: recipeInfo.material_quality_factor,
     // RecipeLevelTable 基礎值
     baseDifficulty: levelTable.difficulty,
     baseDurability: levelTable.durability,
