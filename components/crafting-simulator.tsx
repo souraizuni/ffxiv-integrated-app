@@ -389,31 +389,48 @@ export function CraftingSimulator({
               <div className="p-4 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
                 <div className="flex items-center justify-between mb-4">
                   <h4 className="font-semibold">求解結果</h4>
-                  <span className={`px-2 py-1 rounded text-xs ${
-                    solverResult.success
-                      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                      : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                  }`}>
-                    {solverResult.success ? '成功' : '失敗'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-500">步數: <span className="font-bold text-blue-600">{solverResult.steps}</span></span>
+                    <span className={`px-2 py-1 rounded text-xs ${
+                      solverResult.success
+                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                        : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                    }`}>
+                      {solverResult.success ? '成功' : '失敗'}
+                    </span>
+                  </div>
                 </div>
                 
-                <div className="grid grid-cols-3 gap-3 mb-4">
-                  <div className="p-2 bg-gray-50 dark:bg-gray-800 rounded text-center">
-                    <div className="text-xs text-gray-500">HQ 機率</div>
-                    <div className="text-lg font-bold text-amber-600">{solverResult.hqChance}%</div>
-                  </div>
-                  <div className="p-2 bg-gray-50 dark:bg-gray-800 rounded text-center">
-                    <div className="text-xs text-gray-500">步數</div>
-                    <div className="text-lg font-bold text-blue-600">{solverResult.steps}</div>
-                  </div>
-                  <div className="p-2 bg-gray-50 dark:bg-gray-800 rounded text-center">
-                    <div className="text-xs text-gray-500">品質</div>
-                    <div className="text-lg font-bold text-purple-600">
-                      {Math.round((solverResult.finalState.quality / recipe.quality) * 100)}%
+                {/* 進度條顯示 */}
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <StatusBar
+                    label="進度"
+                    current={solverResult.finalState.progress}
+                    max={recipe.difficulty}
+                    color="blue"
+                  />
+                  <StatusBar
+                    label={recipe.isCollectable ? "品質 (收藏品)" : "品質"}
+                    current={solverResult.finalState.quality}
+                    max={recipe.quality}
+                    color="amber"
+                    collectabilityThresholds={recipe.isCollectable && recipe.collectability ? {
+                      low: recipe.collectability.low * 10,
+                      mid: recipe.collectability.mid * 10,
+                      high: recipe.collectability.high * 10,
+                    } : undefined}
+                  />
+                </div>
+                
+                {/* HQ 機率（非收藏品時顯示） */}
+                {!recipe.isCollectable && (
+                  <div className="mb-4 p-2 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">HQ 機率</span>
+                      <span className="text-lg font-bold text-amber-600 dark:text-amber-400">{solverResult.hqChance}%</span>
                     </div>
                   </div>
-                </div>
+                )}
                 
                 {/* 技能序列預覽 */}
                 <div className="mb-4">
