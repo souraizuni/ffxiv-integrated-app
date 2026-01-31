@@ -211,9 +211,19 @@ export function CraftingSimulator({
   };
   
   // 執行求解器
-  const handleSolve = useCallback(async () => {
+  // handleSolve 支援可選的覆蓋參數，解決 stale closure 問題
+  const handleSolve = useCallback(async (overrides?: {
+    stats?: CrafterStats;
+    options?: Partial<RaphaelSolverOptions>;
+  }) => {
     setIsSolving(true);
     setSolverResult(null);
+    
+    // 使用覆蓋參數或當前狀態
+    const statsToUse = overrides?.stats ?? effectiveStats;
+    const optionsToUse = overrides?.options 
+      ? { ...solverOptions, ...overrides.options }
+      : solverOptions;
     
     // 調試日誌：顯示傳入的配方資訊
     console.log('[CraftingSimulator] handleSolve - Recipe:', {
@@ -230,7 +240,7 @@ export function CraftingSimulator({
     // 調試日誌：顯示使用的屬性（包含食物/藥水加成）
     console.log('[CraftingSimulator] handleSolve - Stats:', {
       base: crafterStats,
-      effective: effectiveStats,
+      effective: statsToUse,
       meal: selectedMeal ? getEnhancerDisplayName(selectedMeal) : undefined,
       medicine: selectedMedicine ? getEnhancerDisplayName(selectedMedicine) : undefined,
     });
@@ -248,8 +258,8 @@ export function CraftingSimulator({
     
     try {
       // raphaelSolver 現在是非同步的，支援 WASM 後端
-      // 使用 effectiveStats 包含食物/藥水加成
-      const result = await raphaelSolver(recipe, effectiveStats, solverOptions);
+      // 使用傳入的 stats 和 options
+      const result = await raphaelSolver(recipe, statsToUse, optionsToUse);
       
       // 確保載入動畫顯示足夠時間
       const elapsed = Date.now() - startTime;
@@ -801,7 +811,7 @@ export function CraftingSimulator({
               
               {/* 求解按鈕 */}
               <button
-                onClick={handleSolve}
+                onClick={() => handleSolve()}
                 disabled={isSolving}
                 className="flex-1 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
@@ -840,16 +850,37 @@ export function CraftingSimulator({
           setShowAdvancedSettings(false);
         }}
         onSolve={(settings) => {
-          // 更新製作者數值
+          // 更新狀態以保持 UI 同步
           setAdvancedCrafterStats(settings.crafterStats);
-          // 更新求解器選項
           setSolverOptions(prev => ({
             ...prev,
             ...settings.solverOptions,
           }));
           setShowAdvancedSettings(false);
-          // 延遲執行求解，確保狀態已更新
-          setTimeout(() => handleSolve(), 0);
+          
+          // 計算新的 enhancedStats（避免 stale closure）
+          const enhancers: Enhancer[] = [];
+          if (selectedMeal) enhancers.push(selectedMeal);
+          if (selectedMedicine) enhancers.push(selectedMedicine);
+          
+          const enhanced = calculateEnhancedAttributes(
+            settings.crafterStats,
+            enhancers
+          );
+          
+          // 合併為完整的 CrafterStats
+          const newEnhancedStats: CrafterStats = {
+            ...settings.crafterStats,
+            craftsmanship: enhanced.craftsmanship,
+            control: enhanced.control,
+            cp: enhanced.cp,
+          };
+          
+          // 直接傳入參數執行求解，避免 stale closure 問題
+          handleSolve({
+            stats: newEnhancedStats,
+            options: settings.solverOptions,
+          });
         }}
       />
 
