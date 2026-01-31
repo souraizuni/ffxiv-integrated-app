@@ -219,6 +219,9 @@ export function CraftingSimulator({
     setIsSolving(true);
     setSolverResult(null);
     
+    // 讓 UI 有時間渲染載入動畫，避免主執行緒被求解器阻塞
+    await new Promise(resolve => setTimeout(resolve, 0));
+    
     // 使用覆蓋參數或當前狀態
     const statsToUse = overrides?.stats ?? effectiveStats;
     const optionsToUse = overrides?.options 
