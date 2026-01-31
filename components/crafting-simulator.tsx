@@ -242,10 +242,21 @@ export function CraftingSimulator({
       console.warn('[CraftingSimulator] 警告：baseQuality 等於 quality，RecipeLevelTable 可能未正確載入');
     }
     
+    // 確保載入動畫至少顯示 300ms（避免閃爍）
+    const startTime = Date.now();
+    const MIN_LOADING_TIME = 300;
+    
     try {
       // raphaelSolver 現在是非同步的，支援 WASM 後端
       // 使用 effectiveStats 包含食物/藥水加成
       const result = await raphaelSolver(recipe, effectiveStats, solverOptions);
+      
+      // 確保載入動畫顯示足夠時間
+      const elapsed = Date.now() - startTime;
+      if (elapsed < MIN_LOADING_TIME) {
+        await new Promise(resolve => setTimeout(resolve, MIN_LOADING_TIME - elapsed));
+      }
+      
       setSolverResult(result);
     } catch (error) {
       console.error('Solver error:', error);
