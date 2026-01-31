@@ -352,6 +352,30 @@ function TabButton({ active, onClick, children }: TabButtonProps) {
 // 食物藥水標籤頁
 // ============================================
 
+// 暫存設定的 localStorage 鍵
+const ENHANCER_PRESET_KEY = 'ffxiv-enhancer-preset';
+
+interface EnhancerPreset {
+  mealId?: number;
+  medicineId?: number;
+  useSoulOfCrafter: boolean;
+}
+
+function loadEnhancerPreset(): EnhancerPreset | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const saved = localStorage.getItem(ENHANCER_PRESET_KEY);
+    return saved ? JSON.parse(saved) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveEnhancerPreset(preset: EnhancerPreset): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(ENHANCER_PRESET_KEY, JSON.stringify(preset));
+}
+
 interface EnhancersTabProps {
   meal?: Enhancer;
   medicine?: Enhancer;
@@ -373,33 +397,112 @@ function EnhancersTab({
   baseStats,
   enhancedStats,
 }: EnhancersTabProps) {
+  const [hasPreset, setHasPreset] = useState(false);
+  
+  // 檢查是否有暫存的設定
+  useEffect(() => {
+    const preset = loadEnhancerPreset();
+    setHasPreset(preset !== null && (preset.mealId !== undefined || preset.medicineId !== undefined || preset.useSoulOfCrafter));
+  }, []);
+
+  // 儲存當前設定
+  const handleSavePreset = () => {
+    saveEnhancerPreset({
+      mealId: meal?.id,
+      medicineId: medicine?.id,
+      useSoulOfCrafter,
+    });
+    setHasPreset(true);
+  };
+
+  // 載入暫存設定
+  const handleLoadPreset = () => {
+    const preset = loadEnhancerPreset();
+    if (preset) {
+      if (preset.mealId) {
+        const savedMeal = MEALS.find(m => m.id === preset.mealId);
+        onMealChange(savedMeal);
+      } else {
+        onMealChange(undefined);
+      }
+      if (preset.medicineId) {
+        const savedMedicine = MEDICINES.find(m => m.id === preset.medicineId);
+        onMedicineChange(savedMedicine);
+      } else {
+        onMedicineChange(undefined);
+      }
+      onSoulOfCrafterChange(preset.useSoulOfCrafter);
+    }
+  };
+
+  // 清除所有設定
+  const handleClearAll = () => {
+    onMealChange(undefined);
+    onMedicineChange(undefined);
+    onSoulOfCrafterChange(false);
+  };
+
   return (
     <div className="space-y-6">
+      {/* 快速操作按鈕 */}
+      <div className="flex gap-2">
+        <button
+          onClick={handleLoadPreset}
+          disabled={!hasPreset}
+          className="flex-1 rounded-lg bg-blue-100 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-200 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50 dark:disabled:bg-gray-800 dark:disabled:text-gray-500"
+        >
+          ⚡ 快速載入
+        </button>
+        <button
+          onClick={handleSavePreset}
+          className="flex-1 rounded-lg bg-green-100 px-3 py-2 text-sm font-medium text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50"
+        >
+          💾 儲存設定
+        </button>
+        <button
+          onClick={handleClearAll}
+          className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+        >
+          ✕ 清除
+        </button>
+      </div>
+
       {/* 食物選擇 */}
       <div className="space-y-2">
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
           食物
         </label>
-        <select
-          value={meal?.id ?? 0}
-          onChange={(e) => {
-            const id = parseInt(e.target.value);
-            if (id === 0) {
-              onMealChange(undefined);
-            } else {
-              const selected = MEALS.find(m => m.id === id);
-              onMealChange(selected);
-            }
-          }}
-          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-        >
-          <option value={0}>無</option>
-          {MEALS.map((m) => (
-            <option key={m.id} value={m.id}>
-              {getEnhancerDisplayName(m)} - {getEnhancerEffectText(m)}
-            </option>
-          ))}
-        </select>
+        <div className="flex gap-2">
+          <select
+            value={meal?.id ?? 0}
+            onChange={(e) => {
+              const id = parseInt(e.target.value);
+              if (id === 0) {
+                onMealChange(undefined);
+              } else {
+                const selected = MEALS.find(m => m.id === id);
+                onMealChange(selected);
+              }
+            }}
+            className="flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+          >
+            <option value={0}>無</option>
+            {MEALS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {getEnhancerDisplayName(m)} - {getEnhancerEffectText(m)}
+              </option>
+            ))}
+          </select>
+          {meal && (
+            <button
+              onClick={() => onMealChange(undefined)}
+              className="rounded-md bg-gray-100 px-3 py-2 text-gray-500 hover:bg-gray-200 hover:text-gray-700 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600 dark:hover:text-gray-200"
+              title="清除食物"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 藥水選擇 */}
@@ -407,38 +510,49 @@ function EnhancersTab({
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
           藥水
         </label>
-        <select
-          value={medicine?.id ?? 0}
-          onChange={(e) => {
-            const id = parseInt(e.target.value);
-            if (id === 0) {
-              onMedicineChange(undefined);
-            } else {
-              const selected = MEDICINES.find(m => m.id === id);
-              onMedicineChange(selected);
-            }
-          }}
-          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-        >
-          <option value={0}>無</option>
-          {MEDICINES.map((m) => (
-            <option key={m.id} value={m.id}>
-              {getEnhancerDisplayName(m)} - {getEnhancerEffectText(m)}
-            </option>
-          ))}
-        </select>
+        <div className="flex gap-2">
+          <select
+            value={medicine?.id ?? 0}
+            onChange={(e) => {
+              const id = parseInt(e.target.value);
+              if (id === 0) {
+                onMedicineChange(undefined);
+              } else {
+                const selected = MEDICINES.find(m => m.id === id);
+                onMedicineChange(selected);
+              }
+            }}
+            className="flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+          >
+            <option value={0}>無</option>
+            {MEDICINES.map((m) => (
+              <option key={m.id} value={m.id}>
+                {getEnhancerDisplayName(m)} - {getEnhancerEffectText(m)}
+              </option>
+            ))}
+          </select>
+          {medicine && (
+            <button
+              onClick={() => onMedicineChange(undefined)}
+              className="rounded-md bg-gray-100 px-3 py-2 text-gray-500 hover:bg-gray-200 hover:text-gray-700 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600 dark:hover:text-gray-200"
+              title="清除藥水"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 專家之證 */}
-      <div className="flex items-center justify-between">
-        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          專家之證
+      <div className="flex items-center justify-between rounded-lg bg-amber-50 p-3 dark:bg-amber-900/20">
+        <label className="text-sm font-medium text-amber-800 dark:text-amber-300">
+          ⭐ 專家之證
         </label>
         <input
           type="checkbox"
           checked={useSoulOfCrafter}
           onChange={(e) => onSoulOfCrafterChange(e.target.checked)}
-          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          className="h-5 w-5 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
         />
       </div>
 
