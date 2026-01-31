@@ -400,7 +400,16 @@ export function CraftingSimulator({
       
       {/* 求解器分頁 */}
       {activeTab === 'solver' && (
-        <div className="space-y-4">
+        <div className="space-y-4 relative">
+          {/* 求解中載入遮罩 */}
+          {isSolving && (
+            <div className="absolute inset-0 bg-white/80 dark:bg-gray-900/80 z-10 flex flex-col items-center justify-center rounded-lg backdrop-blur-sm">
+              <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mb-4" />
+              <div className="text-lg font-medium text-purple-600 dark:text-purple-400">求解中...</div>
+              <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">正在計算最佳技能序列</div>
+            </div>
+          )}
+          
           {/* 求解結果（放最上方） */}
           {solverResult && (
             <div className="space-y-4">
