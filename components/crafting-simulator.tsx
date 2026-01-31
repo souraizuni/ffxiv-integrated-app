@@ -16,6 +16,9 @@ import {
 } from '@/lib/simulator';
 import { raphaelSolver, type RaphaelSolverOptions, type SolverResult } from '@/lib/simulator/solver';
 import { CraftingAnalyzer } from './crafting-analyzer';
+import ProgressBar from './ProgressBar';
+import SolverSettingsModal from './solver-settings-modal';
+
 import { MacroExporter } from './macro-exporter';
 import { MEALS, MEDICINES, SOUL_OF_THE_CRAFTER, calculateEnhancedAttributes, getEnhancerEffectText, getEnhancerDisplayName, type Enhancer } from '@/data/enhancers';
 
@@ -83,6 +86,8 @@ export function CraftingSimulator({
   const [solverResult, setSolverResult] = useState<SolverResult | null>(null);
   const [showMacroExport, setShowMacroExport] = useState(false);
   const [showSolverSettings, setShowSolverSettings] = useState(false);
+  const [showSolverSettingsModal, setShowSolverSettingsModal] = useState(false);
+
   
   // 食物和藥水設定
   const [selectedMeal, setSelectedMeal] = useState<Enhancer | null>(null);
@@ -235,7 +240,12 @@ export function CraftingSimulator({
     try {
       // raphaelSolver 現在是非同步的，支援 WASM 後端
       // 使用 effectiveStats 包含食物/藥水加成
-      const result = await raphaelSolver(recipe, effectiveStats, solverOptions);
+      // include initialQuality if configured via solver options
+      const optionsToPass = { ...solverOptions } as any;
+      if ((optionsToPass.initialQualityEnabled) && typeof optionsToPass.initialQuality === 'number') {
+        optionsToPass.initialQuality = optionsToPass.initialQuality;
+      }
+      const result = await raphaelSolver(recipe, effectiveStats, optionsToPass as any);
       setSolverResult(result);
     } catch (error) {
       console.error('Solver error:', error);
@@ -702,6 +712,14 @@ export function CraftingSimulator({
                 </div>
 
                 {/* 求解選項 */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowSolverSettingsModal(true)}
+                    className="px-2 py-1 text-sm bg-gray-200 dark:bg-gray-800 rounded"
+                  >
+                    進階設定
+                  </button>
+                </div>
                 <div>
                   <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">求解設定</div>
                   <div className="grid grid-cols-2 gap-2">
@@ -793,8 +811,12 @@ export function CraftingSimulator({
       <div className="flex items-center gap-4 p-3 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-lg">
         <div className="flex-1">
           <div className="text-xs text-gray-500">HQ 機率</div>
-          <div className="text-xl font-bold text-amber-600 dark:text-amber-400">
-            {hqChance}%
+          <div>
+            <div className="text-sm text-gray-500 mb-1">數值</div>
+            <div className="flex items-center gap-2">
+              <div className="w-24 font-bold text-amber-600 dark:text-amber-400">{hqChance}%</div>
+              <div className="flex-1"><ProgressBar value={hqChance} size="md" color="#f59e0b" /></div>
+            </div>
           </div>
         </div>
         <div className="flex-1">
