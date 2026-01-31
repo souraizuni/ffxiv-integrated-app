@@ -325,6 +325,7 @@ export async function convertToRecipe(recipeInfo: RecipeInfo): Promise<Recipe> {
         itemLevel: itemInfo.level,
         stackSize: 999,
         isUntradable: !itemInfo.can_be_hq,
+        canBeHQ: itemInfo.can_be_hq,
         categoryId: itemInfo.category_id || 0,
         categoryName: '',
       } : undefined,

@@ -338,6 +338,8 @@ function parseCafemakerRecipe(data: CafemakerRecipeResponse): Recipe {
     if (item && item.ID && amount > 0) {
       // 包含完整的 item 資訊
       const itemName = item.Name ? simplifiedToTw(item.Name) : `物品 #${item.ID}`;
+      // 判斷是否可以 HQ：優先使用 API 回應的 CanBeHq，否則根據 IsUntradable 判斷
+      const canBeHQ = item.CanBeHq !== undefined ? item.CanBeHq === 1 : item.IsUntradable !== 1;
       ingredients.push({
         itemId: item.ID,
         amount,
@@ -353,6 +355,7 @@ function parseCafemakerRecipe(data: CafemakerRecipeResponse): Recipe {
           itemLevel: item.LevelItem || 1,
           stackSize: 999,
           isUntradable: item.IsUntradable === 1,
+          canBeHQ,
           categoryId: 0,
           categoryName: '',
         },

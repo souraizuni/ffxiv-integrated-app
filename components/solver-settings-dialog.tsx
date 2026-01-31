@@ -110,11 +110,12 @@ export function SolverSettingsDialog({
     if (recipe.ingredients) {
       const mats: MaterialWithQuality[] = recipe.ingredients.map((ing: RecipeIngredient) => ({
         itemId: ing.itemId,
-        itemName: ing.item?.name_zh || `物品 #${ing.itemId}`,
+        itemName: ing.item?.name_zh || ing.item?.name || `物品 #${ing.itemId}`,
         itemLevel: ing.item?.itemLevel || 1,
         amount: ing.amount,
         hqAmount: 0,
-        canBeHQ: !ing.item?.isUntradable, // 簡化判斷：可交易的通常可以HQ
+        // 優先使用 canBeHQ 欄位，否則根據 isUntradable 判斷
+        canBeHQ: ing.item?.canBeHQ !== undefined ? ing.item.canBeHQ : !ing.item?.isUntradable,
       }));
       setMaterials(mats);
     }
