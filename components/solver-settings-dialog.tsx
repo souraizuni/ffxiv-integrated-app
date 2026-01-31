@@ -685,31 +685,6 @@ function QualityTab({
 
   return (
     <div className="space-y-6">
-      {/* 輸入模式選擇 */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => onInputModeChange('manual')}
-          className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-            inputMode === 'manual'
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
-          }`}
-        >
-          手動輸入
-        </button>
-        <button
-          onClick={() => onInputModeChange('materials')}
-          disabled={materials.length === 0}
-          className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-            inputMode === 'materials'
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
-          }`}
-        >
-          HQ材料計算
-        </button>
-      </div>
-
       {/* 當前初期品質顯示 */}
       <div className="rounded-md border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900">
         <div className="mb-2 flex items-center justify-between">
@@ -733,59 +708,8 @@ function QualityTab({
         )}
       </div>
 
-      {/* 手動輸入模式 */}
-      {inputMode === 'manual' && (
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-              品質數值
-            </label>
-            <input
-              type="number"
-              min={0}
-              max={recipe.quality}
-              value={initialQuality}
-              onChange={(e) => onInitialQualityChange(Math.min(Math.max(0, parseInt(e.target.value) || 0), recipe.quality))}
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-            />
-          </div>
-          
-          <input
-            type="range"
-            min={0}
-            max={recipe.quality}
-            value={initialQuality}
-            onChange={(e) => onInitialQualityChange(parseInt(e.target.value))}
-            className="w-full"
-          />
-
-          {maxInitialQuality > 0 && (
-            <div className="flex gap-2">
-              <button
-                onClick={() => onInitialQualityChange(0)}
-                className="flex-1 rounded-md bg-gray-100 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-              >
-                0%
-              </button>
-              <button
-                onClick={() => onInitialQualityChange(Math.floor(maxInitialQuality * 0.5))}
-                className="flex-1 rounded-md bg-gray-100 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-              >
-                50%
-              </button>
-              <button
-                onClick={() => onInitialQualityChange(maxInitialQuality)}
-                className="flex-1 rounded-md bg-gray-100 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-              >
-                100%
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* HQ材料計算模式 */}
-      {inputMode === 'materials' && (
+      {/* HQ材料計算 */}
+      {materials.length > 0 ? (
         <div className="space-y-4">
           {/* 快捷按鈕 */}
           <div className="flex gap-2">
@@ -857,14 +781,12 @@ function QualityTab({
               </div>
             ))}
           </div>
-
-          {materials.length === 0 && (
-            <div className="rounded-lg border border-gray-200 bg-gray-50 p-8 text-center dark:border-gray-700 dark:bg-gray-900">
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                此配方無材料資訊，請使用手動輸入模式
-              </p>
-            </div>
-          )}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-8 text-center dark:border-gray-700 dark:bg-gray-900">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            此配方無材料資訊
+          </p>
         </div>
       )}
     </div>
