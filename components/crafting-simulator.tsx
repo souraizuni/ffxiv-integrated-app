@@ -91,6 +91,9 @@ export function CraftingSimulator({
   const [selectedMedicine, setSelectedMedicine] = useState<Enhancer | null>(null);
   const [useSoulOfCrafter, setUseSoulOfCrafter] = useState(false);
   
+  // 從進階設定彈窗返回的製作者數值（覆蓋原有設定）
+  const [advancedCrafterStats, setAdvancedCrafterStats] = useState<CrafterStats | null>(null);
+  
   // 計算增強後的屬性
   const enhancedStats = useMemo(() => {
     const enhancers: Enhancer[] = [];
@@ -111,8 +114,13 @@ export function CraftingSimulator({
     );
   }, [crafterStats, selectedMeal, selectedMedicine, useSoulOfCrafter]);
   
-  // 用於求解的實際屬性（包含食物/藥水加成）
+  // 用於求解的實際屬性（優先使用進階設定，否則用食物/藥水加成）
   const effectiveStats: CrafterStats = useMemo(() => {
+    // 如果有進階設定的製作者數值，優先使用
+    if (advancedCrafterStats) {
+      return advancedCrafterStats;
+    }
+    // 否則使用基礎屬性 + 食物/藥水加成
     if (!enhancedStats) return crafterStats;
     return {
       ...crafterStats,
@@ -120,7 +128,7 @@ export function CraftingSimulator({
       control: enhancedStats.control,
       cp: enhancedStats.cp,
     };
-  }, [crafterStats, enhancedStats]);
+  }, [crafterStats, enhancedStats, advancedCrafterStats]);
   
   // 當選項改變時儲存到 cookie
   useEffect(() => {
@@ -348,23 +356,34 @@ export function CraftingSimulator({
 
       {/* 製作者數值 */}
       <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm border border-blue-200 dark:border-blue-800">
-        <div className="font-medium mb-1 text-blue-800 dark:text-blue-300">⚒️ 製作者數值</div>
+        <div className="flex items-center justify-between mb-1">
+          <span className="font-medium text-blue-800 dark:text-blue-300">⚒️ 製作者數值</span>
+          {advancedCrafterStats && (
+            <span className="text-xs text-green-600 dark:text-green-400">✓ 已套用進階設定</span>
+          )}
+        </div>
         <div className="grid grid-cols-4 gap-2 text-xs">
           <div className="flex flex-col">
             <span className="text-gray-500">等級</span>
-            <span className="font-medium text-gray-900 dark:text-white">{crafterStats.level}</span>
+            <span className="font-medium text-gray-900 dark:text-white">{effectiveStats.level}</span>
           </div>
           <div className="flex flex-col">
             <span className="text-gray-500">作業精度</span>
-            <span className="font-medium text-gray-900 dark:text-white">{crafterStats.craftsmanship}</span>
+            <span className={`font-medium ${advancedCrafterStats && advancedCrafterStats.craftsmanship !== crafterStats.craftsmanship ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white'}`}>
+              {effectiveStats.craftsmanship}
+            </span>
           </div>
           <div className="flex flex-col">
             <span className="text-gray-500">加工精度</span>
-            <span className="font-medium text-gray-900 dark:text-white">{crafterStats.control}</span>
+            <span className={`font-medium ${advancedCrafterStats && advancedCrafterStats.control !== crafterStats.control ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white'}`}>
+              {effectiveStats.control}
+            </span>
           </div>
           <div className="flex flex-col">
             <span className="text-gray-500">CP(製作力)</span>
-            <span className="font-medium text-gray-900 dark:text-white">{crafterStats.cp}</span>
+            <span className={`font-medium ${advancedCrafterStats && advancedCrafterStats.cp !== crafterStats.cp ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white'}`}>
+              {effectiveStats.cp}
+            </span>
           </div>
         </div>
       </div>
@@ -788,9 +807,11 @@ export function CraftingSimulator({
         isOpen={showAdvancedSettings}
         onClose={() => setShowAdvancedSettings(false)}
         recipe={recipe}
-        initialCrafterStats={crafterStats}
+        initialCrafterStats={advancedCrafterStats || crafterStats}
         isSolving={isSolving}
         onApply={(settings) => {
+          // 更新製作者數值
+          setAdvancedCrafterStats(settings.crafterStats);
           // 更新求解器選項
           setSolverOptions(prev => ({
             ...prev,
@@ -799,7 +820,9 @@ export function CraftingSimulator({
           setShowAdvancedSettings(false);
         }}
         onSolve={(settings) => {
-          // 更新設定並開始求解
+          // 更新製作者數值
+          setAdvancedCrafterStats(settings.crafterStats);
+          // 更新求解器選項
           setSolverOptions(prev => ({
             ...prev,
             ...settings.solverOptions,
