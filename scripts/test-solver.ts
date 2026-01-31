@@ -88,6 +88,14 @@ function printResult(result: SolverResult, recipe: Recipe) {
   console.log(`最終進度: ${result.finalState.progress} / ${recipe.difficulty}`);
   console.log(`最終品質: ${result.finalState.quality} / ${recipe.quality}`);
   
+  // 檢查是否使用了比爾格的祝福
+  const byregots = result.actions.find(a => a.id === 'byregots_blessing');
+  if (byregots) {
+    console.log('\n✅ 求解器使用了比爾格的祝福!');
+  } else {
+    console.log('\n⚠️ 求解器沒有使用比爾格的祝福');
+  }
+  
   // 顯示使用的技能（按等級分類）
   console.log('\n===== 使用的技能等級分布 =====');
   const skillLevels: Record<string, number[]> = {};

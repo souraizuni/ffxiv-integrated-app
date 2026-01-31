@@ -8,6 +8,8 @@ import {
   SPECIAL_ACTIONS,
   CRAFTER_PRESETS,
   calculateEnhancedAttributes,
+  getEnhancerEffectText,
+  getEnhancerDisplayName,
   type Enhancer,
   type SpecialActionOption,
 } from '@/data/enhancers';
@@ -42,9 +44,8 @@ export function CrafterStatusEditor({
   const [selectedPreset, setSelectedPreset] = useState<string>('7.0 畢業裝 (HQ 全附魔)');
   
   // 食物與藥水
-  const [selectedMeal, setSelectedMeal] = useState<Enhancer | null>(MEALS[MEALS.length - 1]); // 預設無
-  const [selectedMedicine, setSelectedMedicine] = useState<Enhancer | null>(MEDICINES[MEDICINES.length - 1]); // 預設無
-  const [useHQConsumables, setUseHQConsumables] = useState(true);
+  const [selectedMeal, setSelectedMeal] = useState<Enhancer | null>(null);
+  const [selectedMedicine, setSelectedMedicine] = useState<Enhancer | null>(null);
   
   // 特殊技能選項
   const [enabledSpecialActions, setEnabledSpecialActions] = useState<Set<string>>(
@@ -69,7 +70,7 @@ export function CrafterStatusEditor({
     if (selectedMeal && selectedMeal.id !== 0) enhancers.push(selectedMeal);
     if (selectedMedicine && selectedMedicine.id !== 0) enhancers.push(selectedMedicine);
     
-    const result = calculateEnhancedAttributes(baseStats, enhancers, useHQConsumables);
+    const result = calculateEnhancedAttributes(baseStats, enhancers);
     
     return {
       job: 'CRP',
@@ -79,7 +80,7 @@ export function CrafterStatusEditor({
       cp: result.cp,
       specialist: false,
     };
-  }, [baseStats, selectedMeal, selectedMedicine, useHQConsumables]);
+  }, [baseStats, selectedMeal, selectedMedicine]);
 
   // 計算屬性加成詳情
   const bonusDetails = useMemo(() => {
@@ -87,8 +88,8 @@ export function CrafterStatusEditor({
     if (selectedMeal && selectedMeal.id !== 0) enhancers.push(selectedMeal);
     if (selectedMedicine && selectedMedicine.id !== 0) enhancers.push(selectedMedicine);
     
-    return calculateEnhancedAttributes(baseStats, enhancers, useHQConsumables).bonuses;
-  }, [baseStats, selectedMeal, selectedMedicine, useHQConsumables]);
+    return calculateEnhancedAttributes(baseStats, enhancers).bonuses;
+  }, [baseStats, selectedMeal, selectedMedicine]);
 
   // 通知外部屬性變化
   useEffect(() => {
@@ -272,15 +273,6 @@ export function CrafterStatusEditor({
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
             食物 & 藥水
           </span>
-          <label className="flex items-center gap-1.5 text-xs text-gray-500">
-            <input
-              type="checkbox"
-              checked={useHQConsumables}
-              onChange={(e) => setUseHQConsumables(e.target.checked)}
-              className="rounded"
-            />
-            使用 HQ
-          </label>
         </div>
         
         <div className="grid grid-cols-2 gap-3">
@@ -295,9 +287,10 @@ export function CrafterStatusEditor({
               }}
               className="w-full px-2 py-1.5 border rounded dark:bg-gray-800 dark:border-gray-600 text-sm"
             >
+              <option value={0}>無</option>
               {MEALS.map(meal => (
                 <option key={meal.id} value={meal.id}>
-                  {meal.nameZh}
+                  {getEnhancerDisplayName(meal)} - {getEnhancerEffectText(meal)}
                 </option>
               ))}
             </select>
@@ -314,9 +307,10 @@ export function CrafterStatusEditor({
               }}
               className="w-full px-2 py-1.5 border rounded dark:bg-gray-800 dark:border-gray-600 text-sm"
             >
+              <option value={0}>無</option>
               {MEDICINES.map(med => (
                 <option key={med.id} value={med.id}>
-                  {med.nameZh}
+                  {getEnhancerDisplayName(med)} - {getEnhancerEffectText(med)}
                 </option>
               ))}
             </select>

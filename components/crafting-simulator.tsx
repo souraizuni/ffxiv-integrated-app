@@ -17,6 +17,7 @@ import {
 import { raphaelSolver, type RaphaelSolverOptions, type SolverResult } from '@/lib/simulator/solver';
 import { CraftingAnalyzer } from './crafting-analyzer';
 import { MacroExporter } from './macro-exporter';
+import { MEALS, MEDICINES, SOUL_OF_THE_CRAFTER, calculateEnhancedAttributes, getEnhancerEffectText, getEnhancerDisplayName, type Enhancer } from '@/data/enhancers';
 
 // Cookie 鍵名
 const SOLVER_OPTIONS_COOKIE_KEY = 'ffxiv-solver-options';
@@ -83,6 +84,42 @@ export function CraftingSimulator({
   const [showMacroExport, setShowMacroExport] = useState(false);
   const [showSolverSettings, setShowSolverSettings] = useState(false);
   
+  // 食物和藥水設定
+  const [selectedMeal, setSelectedMeal] = useState<Enhancer | null>(null);
+  const [selectedMedicine, setSelectedMedicine] = useState<Enhancer | null>(null);
+  const [useSoulOfCrafter, setUseSoulOfCrafter] = useState(false);
+  
+  // 計算增強後的屬性
+  const enhancedStats = useMemo(() => {
+    const enhancers: Enhancer[] = [];
+    if (selectedMeal) enhancers.push(selectedMeal);
+    if (selectedMedicine) enhancers.push(selectedMedicine);
+    if (useSoulOfCrafter) enhancers.push(SOUL_OF_THE_CRAFTER);
+    
+    if (enhancers.length === 0) return null;
+    
+    return calculateEnhancedAttributes(
+      {
+        craftsmanship: crafterStats.craftsmanship,
+        control: crafterStats.control,
+        cp: crafterStats.cp,
+        level: crafterStats.level,
+      },
+      enhancers
+    );
+  }, [crafterStats, selectedMeal, selectedMedicine, useSoulOfCrafter]);
+  
+  // 用於求解的實際屬性（包含食物/藥水加成）
+  const effectiveStats: CrafterStats = useMemo(() => {
+    if (!enhancedStats) return crafterStats;
+    return {
+      ...crafterStats,
+      craftsmanship: enhancedStats.craftsmanship,
+      control: enhancedStats.control,
+      cp: enhancedStats.cp,
+    };
+  }, [crafterStats, enhancedStats]);
+  
   // 當選項改變時儲存到 cookie
   useEffect(() => {
     saveSolverOptionsToCookie(solverOptions);
@@ -93,9 +130,17 @@ export function CraftingSimulator({
     setState(createInitialCraftingState(recipe, crafterStats));
     setSelectedActions([]);
     setSolverResult(null);
+    
+    // 自動設定目標品質
+    // 收藏品配方：預設目標為特選（最高）門檻
+    // 一般配方：預設目標為最大品質
+    const defaultTargetQuality = recipe.isCollectable && recipe.collectability
+      ? recipe.collectability.high * 10  // 特選門檻 * 10 = 品質值
+      : recipe.quality;
+    
     setSolverOptions(prev => ({
       ...prev,
-      targetQuality: recipe.quality,
+      targetQuality: defaultTargetQuality,
     }));
   }, [recipe, crafterStats]);
 
@@ -160,9 +205,37 @@ export function CraftingSimulator({
     setIsSolving(true);
     setSolverResult(null);
     
+    // 調試日誌：顯示傳入的配方資訊
+    console.log('[CraftingSimulator] handleSolve - Recipe:', {
+      recipeLevel: recipe.recipeLevel,
+      difficulty: recipe.difficulty,
+      baseDifficulty: recipe.baseDifficulty,
+      quality: recipe.quality,
+      baseQuality: recipe.baseQuality,
+      qualityDivider: recipe.qualityDivider,
+      progressDivider: recipe.progressDivider,
+      recipeLevelId: recipe.recipeLevelId,
+    });
+    
+    // 調試日誌：顯示使用的屬性（包含食物/藥水加成）
+    console.log('[CraftingSimulator] handleSolve - Stats:', {
+      base: crafterStats,
+      effective: effectiveStats,
+      meal: selectedMeal ? getEnhancerDisplayName(selectedMeal) : undefined,
+      medicine: selectedMedicine ? getEnhancerDisplayName(selectedMedicine) : undefined,
+    });
+    
+    // 驗證 baseQuality 是否來自正確的 RecipeLevelTable
+    // Lv85 應該是 baseQuality=6700, qualityDivider=109
+    // 如果 baseQuality 等於 quality，表示 RecipeLevelTable 可能未正確載入
+    if (recipe.baseQuality === recipe.quality && recipe.baseQuality !== undefined) {
+      console.warn('[CraftingSimulator] 警告：baseQuality 等於 quality，RecipeLevelTable 可能未正確載入');
+    }
+    
     try {
       // raphaelSolver 現在是非同步的，支援 WASM 後端
-      const result = await raphaelSolver(recipe, crafterStats, solverOptions);
+      // 使用 effectiveStats 包含食物/藥水加成
+      const result = await raphaelSolver(recipe, effectiveStats, solverOptions);
       setSolverResult(result);
     } catch (error) {
       console.error('Solver error:', error);
@@ -170,7 +243,7 @@ export function CraftingSimulator({
     } finally {
       setIsSolving(false);
     }
-  }, [recipe, crafterStats, solverOptions]);
+  }, [recipe, effectiveStats, solverOptions, crafterStats, selectedMeal, selectedMedicine]);
   
   // 應用求解結果
   const handleApplySolverResult = useCallback(() => {
@@ -245,12 +318,30 @@ export function CraftingSimulator({
 
       {/* 配方資訊 */}
       <div className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg text-sm">
-        <div className="font-medium mb-1">{recipe.item?.name || `配方 ${recipe.id}`}</div>
+        <div className="flex items-center gap-2 mb-1">
+          <span className="font-medium">{recipe.item?.name || `配方 ${recipe.id}`}</span>
+          {recipe.isCollectable && (
+            <span className="px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded text-xs font-medium">
+              📦 收藏品
+            </span>
+          )}
+        </div>
         <div className="grid grid-cols-3 gap-2 text-xs text-gray-500">
           <div>難度: {recipe.difficulty}</div>
           <div>品質: {recipe.quality}</div>
           <div>耐久: {recipe.durability}</div>
         </div>
+        {/* 收藏品門檻資訊 */}
+        {recipe.isCollectable && recipe.collectability && (
+          <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+            <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">收藏價值門檻</div>
+            <div className="flex gap-3 text-xs">
+              <span style={{ color: '#79c7ec' }}>普通: {recipe.collectability.low}</span>
+              <span style={{ color: '#fbc800' }}>精選: {recipe.collectability.mid}</span>
+              <span style={{ color: '#22c55e' }}>特選: {recipe.collectability.high}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 製作者數值 */}
@@ -373,46 +464,91 @@ export function CraftingSimulator({
                 {/* 目標品質 */}
                 <div>
                   <label className="block text-sm text-gray-600 dark:text-gray-400 mb-2">
-                    目標品質
+                    {recipe.isCollectable ? '目標收藏價值' : '目標品質'}
                   </label>
                   <div className="flex gap-2 flex-wrap">
-                    <button
-                      onClick={() => setSolverOptions(prev => ({ ...prev, targetQuality: recipe.quality }))}
-                      className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                        solverOptions.targetQuality === recipe.quality
-                          ? 'bg-purple-500 text-white'
-                          : 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600'
-                      }`}
-                    >
-                      最大 ({recipe.quality})
-                    </button>
-                    <button
-                      onClick={() => setSolverOptions(prev => ({ ...prev, targetQuality: Math.floor(recipe.quality * 0.7) }))}
-                      className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                        solverOptions.targetQuality === Math.floor(recipe.quality * 0.7)
-                          ? 'bg-purple-500 text-white'
-                          : 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600'
-                      }`}
-                    >
-                      70%
-                    </button>
-                    <button
-                      onClick={() => setSolverOptions(prev => ({ ...prev, targetQuality: Math.floor(recipe.quality * 0.5) }))}
-                      className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                        solverOptions.targetQuality === Math.floor(recipe.quality * 0.5)
-                          ? 'bg-purple-500 text-white'
-                          : 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600'
-                      }`}
-                    >
-                      50%
-                    </button>
+                    {/* 收藏品門檻快速選項 */}
+                    {recipe.isCollectable && recipe.collectability ? (
+                      <>
+                        <button
+                          onClick={() => setSolverOptions(prev => ({ ...prev, targetQuality: recipe.collectability!.high * 10 }))}
+                          className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                            solverOptions.targetQuality === recipe.collectability.high * 10
+                              ? 'text-white'
+                              : 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600'
+                          }`}
+                          style={solverOptions.targetQuality === recipe.collectability.high * 10 ? { backgroundColor: '#22c55e' } : {}}
+                        >
+                          特選 ({recipe.collectability.high})
+                        </button>
+                        <button
+                          onClick={() => setSolverOptions(prev => ({ ...prev, targetQuality: recipe.collectability!.mid * 10 }))}
+                          className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                            solverOptions.targetQuality === recipe.collectability.mid * 10
+                              ? 'text-white'
+                              : 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600'
+                          }`}
+                          style={solverOptions.targetQuality === recipe.collectability.mid * 10 ? { backgroundColor: '#fbc800', color: '#854d0e' } : {}}
+                        >
+                          精選 ({recipe.collectability.mid})
+                        </button>
+                        <button
+                          onClick={() => setSolverOptions(prev => ({ ...prev, targetQuality: recipe.collectability!.low * 10 }))}
+                          className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                            solverOptions.targetQuality === recipe.collectability.low * 10
+                              ? 'text-white'
+                              : 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600'
+                          }`}
+                          style={solverOptions.targetQuality === recipe.collectability.low * 10 ? { backgroundColor: '#79c7ec', color: '#0369a1' } : {}}
+                        >
+                          普通 ({recipe.collectability.low})
+                        </button>
+                      </>
+                    ) : (
+                      /* 非收藏品的百分比選項 */
+                      <>
+                        <button
+                          onClick={() => setSolverOptions(prev => ({ ...prev, targetQuality: recipe.quality }))}
+                          className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                            solverOptions.targetQuality === recipe.quality
+                              ? 'bg-purple-500 text-white'
+                              : 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600'
+                          }`}
+                        >
+                          最大 ({recipe.quality})
+                        </button>
+                        <button
+                          onClick={() => setSolverOptions(prev => ({ ...prev, targetQuality: Math.floor(recipe.quality * 0.7) }))}
+                          className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                            solverOptions.targetQuality === Math.floor(recipe.quality * 0.7)
+                              ? 'bg-purple-500 text-white'
+                              : 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600'
+                          }`}
+                        >
+                          70%
+                        </button>
+                        <button
+                          onClick={() => setSolverOptions(prev => ({ ...prev, targetQuality: Math.floor(recipe.quality * 0.5) }))}
+                          className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                            solverOptions.targetQuality === Math.floor(recipe.quality * 0.5)
+                              ? 'bg-purple-500 text-white'
+                              : 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600'
+                          }`}
+                        >
+                          50%
+                        </button>
+                      </>
+                    )}
                     <input
                       type="number"
-                      value={solverOptions.targetQuality}
-                      onChange={(e) => setSolverOptions(prev => ({ ...prev, targetQuality: Number(e.target.value) }))}
+                      value={recipe.isCollectable ? Math.round((solverOptions.targetQuality ?? 0) / 10) : (solverOptions.targetQuality ?? 0)}
+                      onChange={(e) => setSolverOptions(prev => ({ 
+                        ...prev, 
+                        targetQuality: recipe.isCollectable ? Number(e.target.value) * 10 : Number(e.target.value) 
+                      }))}
                       className="px-3 py-1.5 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-600 w-24"
                       min={0}
-                      max={recipe.quality}
+                      max={recipe.isCollectable ? Math.round(recipe.quality / 10) : recipe.quality}
                     />
                   </div>
                 </div>
@@ -463,6 +599,108 @@ export function CraftingSimulator({
                   </div>
                 </div>
                 
+                {/* 食物與藥水 */}
+                <div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">食物、藥水與裝備</div>
+                  <div className="space-y-3">
+                    {/* 專家之證 */}
+                    <label className="flex items-center gap-2 text-sm p-2 rounded bg-amber-50 dark:bg-amber-900/20 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useSoulOfCrafter}
+                        onChange={(e) => setUseSoulOfCrafter(e.target.checked)}
+                        className="rounded text-amber-500 focus:ring-amber-500"
+                      />
+                      <span>⭐ 專家之證</span>
+                      <span className="text-xs text-amber-600 dark:text-amber-400">
+                        {getEnhancerEffectText(SOUL_OF_THE_CRAFTER)}
+                      </span>
+                    </label>
+                    
+                    {/* 食物選擇 */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm">🍽️ 食物</span>
+                      </div>
+                      <select
+                        value={selectedMeal?.id || 0}
+                        onChange={(e) => {
+                          const id = Number(e.target.value);
+                          setSelectedMeal(MEALS.find(m => m.id === id) || null);
+                        }}
+                        className="w-full px-2 py-1.5 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-600"
+                      >
+                        <option value={0}>無</option>
+                        {MEALS.map(meal => (
+                          <option key={meal.id} value={meal.id}>
+                            {getEnhancerDisplayName(meal)} - {getEnhancerEffectText(meal)}
+                          </option>
+                        ))}
+                      </select>
+                      {selectedMeal && (
+                        <div className="mt-1 text-xs text-purple-600 dark:text-purple-400 flex items-center gap-1">
+                          <span>📊 {getEnhancerDisplayName(selectedMeal)}: {getEnhancerEffectText(selectedMeal)}</span>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* 藥水選擇 */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm">🧪 藥水</span>
+                      </div>
+                      <select
+                        value={selectedMedicine?.id || 0}
+                        onChange={(e) => {
+                          const id = Number(e.target.value);
+                          setSelectedMedicine(MEDICINES.find(m => m.id === id) || null);
+                        }}
+                        className="w-full px-2 py-1.5 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-600"
+                      >
+                        <option value={0}>無</option>
+                        {MEDICINES.map(med => (
+                          <option key={med.id} value={med.id}>
+                            {getEnhancerDisplayName(med)} - {getEnhancerEffectText(med)}
+                          </option>
+                        ))}
+                      </select>
+                      {selectedMedicine && (
+                        <div className="mt-1 text-xs text-purple-600 dark:text-purple-400 flex items-center gap-1">
+                          <span>📊 {getEnhancerDisplayName(selectedMedicine)}: {getEnhancerEffectText(selectedMedicine)}</span>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* 顯示加成效果 */}
+                    {enhancedStats && (
+                      <div className="p-2 bg-green-50 dark:bg-green-900/20 rounded-lg text-xs space-y-1">
+                        <div className="text-green-700 dark:text-green-300 font-medium mb-1">📈 屬性加成總計</div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600 dark:text-gray-400">作業精度:</span>
+                          <span className="text-green-600 dark:text-green-400">
+                            {crafterStats.craftsmanship} → {enhancedStats.craftsmanship}
+                            <span className="ml-1">(+{enhancedStats.bonuses.cm})</span>
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600 dark:text-gray-400">加工精度:</span>
+                          <span className="text-green-600 dark:text-green-400">
+                            {crafterStats.control} → {enhancedStats.control}
+                            <span className="ml-1">(+{enhancedStats.bonuses.ct})</span>
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600 dark:text-gray-400">CP:</span>
+                          <span className="text-green-600 dark:text-green-400">
+                            {crafterStats.cp} → {enhancedStats.cp}
+                            <span className="ml-1">(+{enhancedStats.bonuses.cp})</span>
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 {/* 求解選項 */}
                 <div>
                   <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">求解設定</div>
@@ -527,10 +765,15 @@ export function CraftingSimulator({
           color="blue"
         />
         <StatusBar
-          label="品質"
+          label={recipe.isCollectable ? "品質 (收藏品)" : "品質"}
           current={state.quality}
           max={recipe.quality}
           color="amber"
+          collectabilityThresholds={recipe.isCollectable && recipe.collectability ? {
+            low: recipe.collectability.low * 10,   // 轉換收藏價值為品質值
+            mid: recipe.collectability.mid * 10,
+            high: recipe.collectability.high * 10,
+          } : undefined}
         />
         <StatusBar
           label="耐久度"
@@ -784,9 +1027,15 @@ interface StatusBarProps {
   current: number;
   max: number;
   color: 'blue' | 'amber' | 'green' | 'purple';
+  // 收藏品門檻支援
+  collectabilityThresholds?: {
+    low: number;   // 普通（一檔）- 品質值
+    mid: number;   // 精選（二檔）- 品質值
+    high: number;  // 特選（三檔）- 品質值
+  };
 }
 
-function StatusBar({ label, current, max, color }: StatusBarProps) {
+function StatusBar({ label, current, max, color, collectabilityThresholds }: StatusBarProps) {
   const percentage = Math.min(100, (current / max) * 100);
   
   const colorClasses = {
@@ -796,20 +1045,103 @@ function StatusBar({ label, current, max, color }: StatusBarProps) {
     purple: 'bg-purple-500',
   };
 
+  // 計算收藏品門檻位置（轉換為百分比）
+  const getThresholdPosition = (threshold: number) => {
+    return Math.min(100, (threshold / max) * 100);
+  };
+
+  // 判斷當前收藏品等級
+  const getCollectabilityLevel = () => {
+    if (!collectabilityThresholds) return null;
+    // 收藏價值 = 品質 / 10
+    const collectability = current / 10;
+    if (collectability >= collectabilityThresholds.high / 10) return 'high';
+    if (collectability >= collectabilityThresholds.mid / 10) return 'mid';
+    if (collectability >= collectabilityThresholds.low / 10) return 'low';
+    return null;
+  };
+
+  const collectabilityLevel = collectabilityThresholds ? getCollectabilityLevel() : null;
+
+  // 收藏品等級顏色
+  const collectabilityColors = {
+    low: '#79c7ec',   // 藍色 - 普通
+    mid: '#fbc800',   // 金色 - 精選
+    high: '#c0ffc0',  // 綠色 - 特選
+  };
+
   return (
     <div className="space-y-1">
       <div className="flex justify-between text-sm">
         <span className="text-gray-500">{label}</span>
-        <span className="font-medium">
+        <span className="font-medium flex items-center gap-2">
           {current} / {max}
+          {collectabilityThresholds && collectabilityLevel && (
+            <span 
+              className="px-1.5 py-0.5 rounded text-xs font-bold"
+              style={{ 
+                backgroundColor: collectabilityColors[collectabilityLevel],
+                color: collectabilityLevel === 'high' ? '#166534' : collectabilityLevel === 'mid' ? '#854d0e' : '#0369a1'
+              }}
+            >
+              {collectabilityLevel === 'high' ? '特選' : collectabilityLevel === 'mid' ? '精選' : '普通'}
+            </span>
+          )}
         </span>
       </div>
-      <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+      <div className="relative h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+        {/* 進度條 */}
         <div
           className={`h-full ${colorClasses[color]} transition-all duration-300`}
           style={{ width: `${percentage}%` }}
         />
+        {/* 收藏品門檻標記 */}
+        {collectabilityThresholds && (
+          <>
+            {/* 普通門檻（一檔）- 藍色 */}
+            <div
+              className="absolute top-0 bottom-0 w-0.5"
+              style={{ 
+                left: `${getThresholdPosition(collectabilityThresholds.low)}%`,
+                backgroundColor: collectabilityColors.low,
+              }}
+              title={`普通: ${collectabilityThresholds.low / 10}`}
+            />
+            {/* 精選門檻（二檔）- 金色 */}
+            <div
+              className="absolute top-0 bottom-0 w-0.5"
+              style={{ 
+                left: `${getThresholdPosition(collectabilityThresholds.mid)}%`,
+                backgroundColor: collectabilityColors.mid,
+              }}
+              title={`精選: ${collectabilityThresholds.mid / 10}`}
+            />
+            {/* 特選門檻（三檔）- 綠色 */}
+            <div
+              className="absolute top-0 bottom-0 w-0.5"
+              style={{ 
+                left: `${getThresholdPosition(collectabilityThresholds.high)}%`,
+                backgroundColor: collectabilityColors.high,
+              }}
+              title={`特選: ${collectabilityThresholds.high / 10}`}
+            />
+          </>
+        )}
       </div>
+      {/* 收藏品門檻數值 */}
+      {collectabilityThresholds && (
+        <div className="flex justify-between text-xs text-gray-400">
+          <span style={{ color: collectabilityColors.low }}>
+            普通: {collectabilityThresholds.low / 10}
+          </span>
+          <span style={{ color: collectabilityColors.mid }}>
+            精選: {collectabilityThresholds.mid / 10}
+          </span>
+          <span style={{ color: collectabilityColors.high }}>
+            特選: {collectabilityThresholds.high / 10}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

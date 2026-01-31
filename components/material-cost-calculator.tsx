@@ -5,12 +5,28 @@ import type { FlattenedMaterial, MaterialTreeNode } from '@/types';
 
 // 材料來源選擇：購買或自製
 type MaterialSource = 'buy' | 'craft';
+type MaterialPossession = 'buy' | 'craft' | 'have';
 
 interface MaterialCostEntry {
   itemId: number;
+  itemName?: string; // 物品名稱
   unitPrice: number;
   purchaseQty: number; // 實際購買數量
   source: MaterialSource;
+  possession?: MaterialPossession; // 新增：已擁有狀態
+  ownedQty?: number; // 已擁有的數量
+  isHQ?: boolean; // 是否為優質材料
+}
+
+interface LoadedProductionData {
+  multiplier: number;
+  entries: MaterialCostEntry[];
+  // 利潤計算相關（可選，舊紀錄可能沒有）
+  profitSettings?: {
+    sellPrice: number;
+    taxRate: number;
+    reserveQty: number;
+  };
 }
 
 interface MaterialCostCalculatorProps {
@@ -18,6 +34,8 @@ interface MaterialCostCalculatorProps {
   materialTree?: MaterialTreeNode | null;
   craftYield?: number;
   onCostChange?: (totalCost: number, costPerUnit: number) => void;
+  initialData?: LoadedProductionData | null;
+  onDataLoaded?: () => void;
 }
 
 export function MaterialCostCalculator({
@@ -25,6 +43,8 @@ export function MaterialCostCalculator({
   materialTree,
   craftYield = 1,
   onCostChange,
+  initialData,
+  onDataLoaded,
 }: MaterialCostCalculatorProps) {
   // 過濾掉根節點（目標成品本身），只保留真正的材料
   const actualMaterials = useMemo(() => {
@@ -50,6 +70,9 @@ export function MaterialCostCalculator({
           unitPrice: 0,
           purchaseQty: m.totalAmount, // 預設購買數量 = 需求量
           source: m.isBaseMaterial ? 'buy' : 'craft',
+          possession: 'buy', // 預設為購買（可切換為已擁有或自製）
+          ownedQty: 0,
+          isHQ: false, // 預設非優質
         });
       });
       return map;
@@ -59,8 +82,34 @@ export function MaterialCostCalculator({
   // 製作倍數
   const [multiplier, setMultiplier] = useState(1);
 
+  // 利潤計算設定（提升到父元件以便儲存）
+  const [sellPrice, setSellPrice] = useState(0);
+  const [taxRate, setTaxRate] = useState(5);
+  const [reserveQty, setReserveQty] = useState(0);
+
   // 瓶頸分析開關
   const [showBottleneck, setShowBottleneck] = useState(false);
+
+  // 載入外部資料（從生產紀錄）
+  useEffect(() => {
+    if (initialData) {
+      setMultiplier(initialData.multiplier);
+      setCostEntries((prev) => {
+        const newMap = new Map(prev);
+        initialData.entries.forEach((e) => {
+          newMap.set(e.itemId, e);
+        });
+        return newMap;
+      });
+      // 載入利潤計算設定（如果有的話）
+      if (initialData.profitSettings) {
+        setSellPrice(initialData.profitSettings.sellPrice);
+        setTaxRate(initialData.profitSettings.taxRate);
+        setReserveQty(initialData.profitSettings.reserveQty);
+      }
+      onDataLoaded?.();
+    }
+  }, [initialData, onDataLoaded]);
 
   // 當材料列表變化時，更新 costEntries
   useEffect(() => {
@@ -116,6 +165,41 @@ export function MaterialCostCalculator({
     });
   }, []);
 
+  const updatePossession = useCallback((itemId: number, possession: MaterialPossession) => {
+    setCostEntries((prev) => {
+      const newMap = new Map(prev);
+      const entry = newMap.get(itemId);
+      if (entry) {
+        // 若切換到已擁有，保留 ownedQty（預設 0）
+        newMap.set(itemId, { ...entry, possession });
+      }
+      return newMap;
+    });
+  }, []);
+
+  const updateOwnedQty = useCallback((itemId: number, qty: number) => {
+    setCostEntries((prev) => {
+      const newMap = new Map(prev);
+      const entry = newMap.get(itemId);
+      if (entry) {
+        newMap.set(itemId, { ...entry, ownedQty: qty });
+      }
+      return newMap;
+    });
+  }, []);
+
+  // 更新是否為優質材料
+  const updateIsHQ = useCallback((itemId: number, isHQ: boolean) => {
+    setCostEntries((prev) => {
+      const newMap = new Map(prev);
+      const entry = newMap.get(itemId);
+      if (entry) {
+        newMap.set(itemId, { ...entry, isHQ });
+      }
+      return newMap;
+    });
+  }, []);
+
   // 計算實際需要購買的材料（考慮材料樹結構）
   const actualRequirements = useMemo((): Map<number, number> => {
     const requirements = new Map<number, number>();
@@ -128,8 +212,11 @@ export function MaterialCostCalculator({
       // 沒有材料樹時，直接使用 materials 的數量
       actualMaterials.forEach((m) => {
         const entry = costEntries.get(m.itemId);
+        // 若有已擁有數量，需求量應減去已擁有
+        const owned = entry?.ownedQty || 0;
+        const need = Math.max(0, m.totalAmount * multiplier - owned);
         if (m.isBaseMaterial || entry?.source === 'buy') {
-          requirements.set(m.itemId, m.totalAmount * multiplier);
+          requirements.set(m.itemId, need);
         }
       });
       return requirements;
@@ -160,6 +247,7 @@ export function MaterialCostCalculator({
     const calculateRequirements = (node: MaterialTreeNode, skipDescendants: boolean) => {
       const entry = costEntries.get(node.itemId);
       const isBuying = entry?.source === 'buy';
+      const owned = entry?.ownedQty || 0;
 
       // 如果父節點已被購買，跳過這個節點
       if (skipDescendants) {
@@ -168,16 +256,18 @@ export function MaterialCostCalculator({
 
       // 如果這個節點選擇購買
       if (isBuying) {
+        const required = Math.max(0, node.amount * multiplier - owned);
         const current = requirements.get(node.itemId) || 0;
-        requirements.set(node.itemId, current + node.amount * multiplier);
+        requirements.set(node.itemId, current + required);
         // 不處理子節點
         return;
       }
 
       // 如果是基礎材料
       if (node.isBaseMaterial) {
+        const required = Math.max(0, node.amount * multiplier - owned);
         const current = requirements.get(node.itemId) || 0;
-        requirements.set(node.itemId, current + node.amount * multiplier);
+        requirements.set(node.itemId, current + required);
         return;
       }
 
@@ -200,13 +290,26 @@ export function MaterialCostCalculator({
     let totalCost = 0;
     let totalCostByRequirement = 0; // 按需求量計算的成本（用於比較）
 
+    // 基礎材料成本
     actualRequirements.forEach((requiredQty, itemId) => {
       const entry = costEntries.get(itemId);
-      if (entry) {
+      const material = actualMaterials.find((m) => m.itemId === itemId);
+      if (entry && material?.isBaseMaterial) {
         // 實際成本 = 單價 × 購買數量
         const purchaseQty = entry.purchaseQty || requiredQty;
         totalCost += entry.unitPrice * purchaseQty;
         // 需求成本 = 單價 × 需求量
+        totalCostByRequirement += entry.unitPrice * requiredQty;
+      }
+    });
+
+    // 中間製品成本（選擇購買的）
+    craftableMaterials.forEach((material) => {
+      const entry = costEntries.get(material.itemId);
+      if (entry?.source === 'buy') {
+        const requiredQty = actualRequirements.get(material.itemId) || 0;
+        const purchaseQty = entry.purchaseQty || requiredQty;
+        totalCost += entry.unitPrice * purchaseQty;
         totalCostByRequirement += entry.unitPrice * requiredQty;
       }
     });
@@ -216,29 +319,37 @@ export function MaterialCostCalculator({
     const wastedCost = totalCost - totalCostByRequirement; // 多餘材料成本
 
     return { totalCost, totalOutput, costPerUnit, wastedCost, totalCostByRequirement };
-  }, [actualRequirements, costEntries, multiplier, craftYield]);
+  }, [actualRequirements, costEntries, multiplier, craftYield, actualMaterials, craftableMaterials]);
 
   // 計算成本細分（使用購買數量）
   const costBreakdown = useMemo(() => {
     let baseCost = 0;
     let craftableCost = 0;
 
+    // 基礎材料成本
     actualRequirements.forEach((requiredQty, itemId) => {
       const material = actualMaterials.find((m) => m.itemId === itemId);
       const entry = costEntries.get(itemId);
-      if (material && entry) {
+      if (material && entry && material.isBaseMaterial) {
         const purchaseQty = entry.purchaseQty || requiredQty;
         const cost = entry.unitPrice * purchaseQty;
-        if (material.isBaseMaterial) {
-          baseCost += cost;
-        } else {
-          craftableCost += cost;
-        }
+        baseCost += cost;
+      }
+    });
+
+    // 中間製品成本（選擇購買的）
+    craftableMaterials.forEach((material) => {
+      const entry = costEntries.get(material.itemId);
+      if (entry?.source === 'buy') {
+        const actualQty = actualRequirements.get(material.itemId) || 0;
+        const purchaseQty = entry.purchaseQty || actualQty;
+        const cost = entry.unitPrice * purchaseQty;
+        craftableCost += cost;
       }
     });
 
     return { baseCost, craftableCost };
-  }, [actualRequirements, actualMaterials, costEntries]);
+  }, [actualRequirements, actualMaterials, costEntries, craftableMaterials]);
 
   // 計算瓶頸分析（哪個材料限制了製作數量）
   const bottleneckAnalysis = useMemo(() => {
@@ -350,6 +461,57 @@ export function MaterialCostCalculator({
     });
   }, [actualRequirements]);
 
+  // 儲存生產紀錄（localStorage 原型）
+  const saveProductionRecord = useCallback(() => {
+    try {
+      // 建立 itemId -> 物品名稱的映射
+      const itemNameMap = new Map<number, string>();
+      actualMaterials.forEach((m) => {
+        itemNameMap.set(m.itemId, m.item.name);
+      });
+
+      // 只儲存實際需要的材料（需求量 > 0 或購買中間製品）
+      const filteredEntries = Array.from(costEntries.values())
+        .filter((entry) => {
+          const requiredQty = actualRequirements.get(entry.itemId) || 0;
+          // 保留需求量 > 0 的材料，或者選擇購買的中間製品
+          return requiredQty > 0 || (entry.source === 'buy' && entry.purchaseQty > 0);
+        })
+        .map((entry) => ({
+          ...entry,
+          itemName: itemNameMap.get(entry.itemId) || undefined,
+        }));
+
+      const record = {
+        id: `rec_${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        multiplier,
+        craftYield,
+        totalCost: calculations.totalCost,
+        costPerUnit: calculations.costPerUnit,
+        costBreakdown,
+        entries: filteredEntries,
+        materialTree: materialTree ? { itemId: materialTree.itemId, name: (materialTree as any).item?.name } : null,
+        // 利潤計算相關設定
+        profitSettings: {
+          sellPrice,
+          taxRate,
+          reserveQty,
+        },
+      } as const;
+
+      const key = 'production_records';
+      const raw = localStorage.getItem(key);
+      const arr = raw ? JSON.parse(raw) : [];
+      arr.unshift(record);
+      localStorage.setItem(key, JSON.stringify(arr));
+      alert('已儲存生產紀錄');
+    } catch (e) {
+      console.error(e);
+      alert('儲存失敗');
+    }
+  }, [calculations, costBreakdown, costEntries, multiplier, craftYield, materialTree, sellPrice, taxRate, reserveQty]);
+
   if (actualMaterials.length === 0) {
     return (
       <div className="p-4 text-center text-gray-500">沒有需要計算成本的材料</div>
@@ -426,8 +588,14 @@ export function MaterialCostCalculator({
                   <th className="px-3 py-2 text-center font-medium text-gray-600 dark:text-gray-400">
                     來源
                   </th>
+                  <th className="px-3 py-2 text-center font-medium text-gray-600 dark:text-gray-400">
+                    HQ
+                  </th>
                   <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">
                     需求量
+                  </th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">
+                    購買量
                   </th>
                   <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">
                     購買單價
@@ -465,28 +633,47 @@ export function MaterialCostCalculator({
                         </div>
                       </td>
                       <td className="px-3 py-2">
-                        <div className="flex justify-center gap-1">
+                        <div className="flex justify-center gap-2 items-center">
                           <button
-                            onClick={() => updateSource(material.itemId, 'craft')}
-                            className={`px-2 py-1 text-xs rounded transition-colors ${
-                              !isBuying
-                                ? 'bg-green-500 text-white'
-                                : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-700'
-                            }`}
+                            onClick={() => { updateSource(material.itemId, 'craft'); updatePossession(material.itemId, 'craft'); }}
+                            className={`px-2 py-1 text-xs rounded transition-colors ${!isBuying ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-700'}`}
                           >
                             自製
                           </button>
                           <button
-                            onClick={() => updateSource(material.itemId, 'buy')}
-                            className={`px-2 py-1 text-xs rounded transition-colors ${
-                              isBuying
-                                ? 'bg-amber-500 text-white'
-                                : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-700'
-                            }`}
+                            onClick={() => { updateSource(material.itemId, 'buy'); updatePossession(material.itemId, 'buy'); }}
+                            className={`px-2 py-1 text-xs rounded transition-colors ${isBuying ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-700'}`}
                           >
                             購買
                           </button>
+                          <button
+                            onClick={() => { updatePossession(material.itemId, 'have'); updateSource(material.itemId, 'buy'); }}
+                            className={`px-2 py-1 text-xs rounded transition-colors ${entry?.possession === 'have' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-700'}`}
+                          >
+                            已擁有
+                          </button>
+                          {entry?.possession === 'have' && (
+                            <input
+                              type="number"
+                              min={0}
+                              value={entry?.ownedQty || 0}
+                              onChange={(e) => updateOwnedQty(material.itemId, Math.max(0, parseInt(e.target.value) || 0))}
+                              className="w-20 px-2 py-1 text-sm border rounded text-right"
+                              title="已擁有數量"
+                            />
+                          )}
                         </div>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <label className="inline-flex items-center gap-1 cursor-pointer" title="優質材料（可用於計算初期品質）">
+                          <input
+                            type="checkbox"
+                            checked={entry?.isHQ || false}
+                            onChange={(e) => updateIsHQ(material.itemId, e.target.checked)}
+                            className="w-4 h-4 rounded border-gray-300 text-amber-500 focus:ring-amber-500"
+                          />
+                          {entry?.isHQ && <span className="text-xs text-amber-500 font-bold">HQ</span>}
+                        </label>
                       </td>
                       <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-400">
                         {isBuying ? (
@@ -495,6 +682,39 @@ export function MaterialCostCalculator({
                           <span className="text-gray-400 line-through">
                             {originalQty}
                           </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {isBuying ? (
+                          <div className="flex items-center justify-end gap-2">
+                            <input
+                              type="number"
+                              min={0}
+                              value={entry?.purchaseQty || actualQty}
+                              onChange={(e) =>
+                                updatePurchaseQty(
+                                  material.itemId,
+                                  Math.max(0, parseInt(e.target.value) || 0)
+                                )
+                              }
+                              className={`w-20 px-2 py-1 text-right text-sm border rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600 ${(entry?.purchaseQty || actualQty) < actualQty ? 'border-red-400 bg-red-50 dark:bg-red-900/20' : ''} ${(entry?.purchaseQty || actualQty) > actualQty ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20' : ''}`}
+                            />
+                            {entry?.possession === 'have' && (
+                              <span className="text-xs text-green-600">擁有 {entry?.ownedQty || 0}</span>
+                            )}
+                            {(entry?.purchaseQty || actualQty) > actualQty && (
+                              <span className="text-xs text-amber-600" title="多餘數量">
+                                +{(entry?.purchaseQty || actualQty) - actualQty}
+                              </span>
+                            )}
+                            {(entry?.purchaseQty || actualQty) < actualQty && (
+                              <span className="text-xs text-red-600" title="不足數量">
+                                -{actualQty - (entry?.purchaseQty || actualQty)}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">-</span>
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">
@@ -516,13 +736,18 @@ export function MaterialCostCalculator({
                         />
                       </td>
                       <td className="px-3 py-2 text-right font-medium">
-                        {isBuying && subtotal > 0 ? (
-                          <span className="text-amber-600">
-                            {subtotal.toLocaleString()}
-                          </span>
-                        ) : (
-                          <span className="text-gray-400">-</span>
-                        )}
+                        {isBuying && (() => {
+                          const purchaseQty = entry?.purchaseQty || actualQty;
+                          const cost = (entry?.unitPrice || 0) * purchaseQty;
+                          return cost > 0 ? (
+                            <span className="text-amber-600">
+                              {cost.toLocaleString()}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          );
+                        })()}
+                        {!isBuying && <span className="text-gray-400">-</span>}
                       </td>
                     </tr>
                   );
@@ -599,7 +824,27 @@ export function MaterialCostCalculator({
                       {actualQty}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <div className="flex items-center justify-end gap-1">
+                      <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => { updateSource(material.itemId, 'craft'); updatePossession(material.itemId, 'craft'); }}
+                            className={`px-2 py-1 text-xs rounded ${entry?.possession === 'craft' ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-500'}`}
+                          >
+                            自製
+                          </button>
+                          <button
+                            onClick={() => { updateSource(material.itemId, 'buy'); updatePossession(material.itemId, 'buy'); }}
+                            className={`px-2 py-1 text-xs rounded ${entry?.possession === 'buy' ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-500'}`}
+                          >
+                            購買
+                          </button>
+                          <button
+                            onClick={() => { updatePossession(material.itemId, 'have'); updateSource(material.itemId, 'buy'); }}
+                            className={`px-2 py-1 text-xs rounded ${entry?.possession === 'have' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500'}`}
+                          >
+                            已擁有
+                          </button>
+                        </div>
                         <input
                           type="number"
                           min={0}
@@ -617,6 +862,16 @@ export function MaterialCostCalculator({
                             hasExcess ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20' : ''
                           }`}
                         />
+                        {entry?.possession === 'have' && (
+                          <input
+                            type="number"
+                            min={0}
+                            value={entry?.ownedQty || 0}
+                            onChange={(e) => updateOwnedQty(material.itemId, Math.max(0, parseInt(e.target.value) || 0))}
+                            className="w-20 px-2 py-1 text-sm border rounded text-right"
+                            title="已擁有數量"
+                          />
+                        )}
                         {hasExcess && (
                           <span className="text-xs text-amber-600" title="多餘數量">
                             +{purchaseQty - actualQty}
@@ -800,11 +1055,26 @@ export function MaterialCostCalculator({
         </div>
       </div>
 
+      <div className="flex items-center justify-end gap-2">
+        <button
+          onClick={saveProductionRecord}
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+        >
+          儲存生產紀錄
+        </button>
+      </div>
+
       {/* 利潤計算器 */}
       <ProfitCalculator
         costPerUnit={calculations.costPerUnit}
         totalOutput={calculations.totalOutput}
         totalCost={calculations.totalCost}
+        sellPrice={sellPrice}
+        onSellPriceChange={setSellPrice}
+        taxRate={taxRate}
+        onTaxRateChange={setTaxRate}
+        reserveQty={reserveQty}
+        onReserveQtyChange={setReserveQty}
       />
     </div>
   );
@@ -815,23 +1085,38 @@ function ProfitCalculator({
   costPerUnit,
   totalOutput,
   totalCost,
+  sellPrice,
+  onSellPriceChange,
+  taxRate,
+  onTaxRateChange,
+  reserveQty,
+  onReserveQtyChange,
 }: {
   costPerUnit: number;
   totalOutput: number;
   totalCost: number;
+  sellPrice: number;
+  onSellPriceChange: (price: number) => void;
+  taxRate: number;
+  onTaxRateChange: (rate: number) => void;
+  reserveQty: number;
+  onReserveQtyChange: (qty: number) => void;
 }) {
-  const [sellPrice, setSellPrice] = useState(0);
-  const [taxRate, setTaxRate] = useState(5);
+  // 實際可販售數量 = 總產出 - 保留數量
+  const sellableOutput = Math.max(0, totalOutput - reserveQty);
+  // 保留數量攤提到成本：實際用於銷售的成本 = 總成本 × (可販售 / 總產出)
+  const adjustedCost = totalOutput > 0 ? totalCost * (sellableOutput / totalOutput) : 0;
+  const adjustedCostPerUnit = sellableOutput > 0 ? adjustedCost / sellableOutput : 0;
 
   const profit = useMemo(() => {
-    if (totalOutput <= 0 || sellPrice <= 0) return null;
+    if (sellableOutput <= 0 || sellPrice <= 0) return null;
 
-    const grossRevenue = sellPrice * totalOutput;
+    const grossRevenue = sellPrice * sellableOutput;
     const tax = grossRevenue * (taxRate / 100);
     const netRevenue = grossRevenue - tax;
-    const netProfit = netRevenue - totalCost;
-    const profitPerUnit = netProfit / totalOutput;
-    const profitMargin = totalCost > 0 ? (netProfit / totalCost) * 100 : 0;
+    const netProfit = netRevenue - adjustedCost;
+    const profitPerUnit = netProfit / sellableOutput;
+    const profitMargin = adjustedCost > 0 ? (netProfit / adjustedCost) * 100 : 0;
 
     return {
       grossRevenue,
@@ -840,8 +1125,10 @@ function ProfitCalculator({
       netProfit,
       profitPerUnit,
       profitMargin,
+      sellableOutput,
+      reservedValue: reserveQty * costPerUnit, // 保留品價值
     };
-  }, [sellPrice, taxRate, totalOutput, totalCost]);
+  }, [sellPrice, taxRate, sellableOutput, adjustedCost, reserveQty, costPerUnit]);
 
   return (
     <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
@@ -858,7 +1145,7 @@ function ProfitCalculator({
             min={0}
             value={sellPrice || ''}
             onChange={(e) =>
-              setSellPrice(Math.max(0, parseFloat(e.target.value) || 0))
+              onSellPriceChange(Math.max(0, parseFloat(e.target.value) || 0))
             }
             className="w-28 px-2 py-1 text-sm border rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600"
             placeholder="輸入售價"
@@ -870,7 +1157,7 @@ function ProfitCalculator({
           </label>
           <select
             value={taxRate}
-            onChange={(e) => setTaxRate(parseFloat(e.target.value))}
+            onChange={(e) => onTaxRateChange(parseFloat(e.target.value))}
             className="px-2 py-1 text-sm border rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600"
           >
             <option value={0}>0% (免稅)</option>
@@ -878,7 +1165,41 @@ function ProfitCalculator({
             <option value={5}>5% (預設)</option>
           </select>
         </div>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-600 dark:text-gray-400">
+            保留數量：
+          </label>
+          <input
+            type="number"
+            min={0}
+            max={totalOutput}
+            value={reserveQty || ''}
+            onChange={(e) =>
+              onReserveQtyChange(Math.min(totalOutput, Math.max(0, parseInt(e.target.value) || 0)))
+            }
+            className="w-20 px-2 py-1 text-sm border rounded focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600"
+            placeholder="0"
+          />
+          <span className="text-xs text-gray-500">/ {totalOutput}</span>
+        </div>
       </div>
+
+      {/* 保留數量說明 */}
+      {reserveQty > 0 && (
+        <div className="mb-4 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-purple-600 dark:text-purple-400">
+              🎁 保留 {reserveQty} 個自用（價值約 {Math.round(reserveQty * costPerUnit).toLocaleString()} 金）
+            </span>
+            <span className="text-gray-600 dark:text-gray-400">
+              可販售：{sellableOutput} 個
+            </span>
+          </div>
+          <div className="text-xs text-gray-500 mt-1">
+            成本將按可販售比例計算：{Math.round(adjustedCost).toLocaleString()} 金（單位 {adjustedCostPerUnit.toFixed(2)} 金）
+          </div>
+        </div>
+      )}
 
       {profit && (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">

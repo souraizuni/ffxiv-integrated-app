@@ -128,6 +128,7 @@ export interface SolverOptions {
  */
 export interface RaphaelSolverOptions {
   targetQuality?: number;         // 目標品質 (null = 最大品質)
+  initialQuality?: number;        // 初期品質（使用 HQ 素材時）
   useManipulation?: boolean;      // 使用掌握
   useHeartAndSoul?: boolean;      // 使用能工巧匠圖紙
   useQuickInnovation?: boolean;   // 使用快速革新
@@ -135,6 +136,20 @@ export interface RaphaelSolverOptions {
   backloadProgress?: boolean;     // 後置作業技能（快速求解）
   adversarial?: boolean;          // 確保 100% 可靠（防黑球）
   preferWasm?: boolean;           // 是否優先使用 WASM
+}
+
+/**
+ * 增強後的製作者屬性（含食物藥水加成）
+ */
+export interface EnhancedCrafterStats extends CrafterStats {
+  baseCraftsmanship?: number;     // 基礎作業精度（未加食物藥水）
+  baseControl?: number;           // 基礎加工精度（未加食物藥水）
+  baseCp?: number;                // 基礎 CP（未加食物藥水）
+  bonuses?: {
+    craftsmanship: number;
+    control: number;
+    cp: number;
+  };
 }
 
 // ============================================
@@ -174,6 +189,12 @@ async function wasmRaphaelSolve(
     
     // 建立初始狀態
     const wasmStatus = wasmSolver.newStatus(wasmAttrs, wasmRecipe);
+    
+    // 設定初期品質（來自 HQ 素材）
+    if (options.initialQuality !== undefined && options.initialQuality > 0) {
+      wasmStatus.quality = options.initialQuality;
+      console.log('[WASM Debug] 設定初期品質:', options.initialQuality);
+    }
     
     // 檢查是否可以使用 Trained Eye（需要玩家等級比配方等級高 10 級以上）
     // 配方的 recipeLevel 是 ClassJobLevel（如 81 級配方）
@@ -348,11 +369,69 @@ async function wasmDfsSolve(
 }
 
 /**
+ * WASM 動作 ID 到本專案動作 ID 的映射
+ * WASM (ffxiv-best-craft) 使用的命名與我們的可能不同
+ */
+const wasmActionIdMap: Record<string, string> = {
+  // 標準映射（相同）
+  'basic_synthesis': 'basic_synthesis',
+  'basic_touch': 'basic_touch',
+  'masters_mend': 'masters_mend',
+  'hasty_touch': 'hasty_touch',
+  'rapid_synthesis': 'rapid_synthesis',
+  'observe': 'observe',
+  'tricks_of_the_trade': 'tricks_of_the_trade',
+  'standard_touch': 'standard_touch',
+  'great_strides': 'great_strides',
+  'innovation': 'innovation',
+  'veneration': 'veneration',
+  'muscle_memory': 'muscle_memory',
+  'careful_synthesis': 'careful_synthesis',
+  'manipulation': 'manipulation',
+  'prudent_touch': 'prudent_touch',
+  'reflect': 'reflect',
+  'preparatory_touch': 'preparatory_touch',
+  'groundwork': 'groundwork',
+  'delicate_synthesis': 'delicate_synthesis',
+  'intensive_synthesis': 'intensive_synthesis',
+  'advanced_touch': 'advanced_touch',
+  'prudent_synthesis': 'prudent_synthesis',
+  'trained_finesse': 'trained_finesse',
+  'careful_observation': 'careful_observation',
+  'heart_and_soul': 'heart_and_soul',
+  'trained_eye': 'trained_eye',
+  
+  // 需要映射的動作
+  'waste_not': 'waste_not',
+  'waste_not_ii': 'waste_not_2',        // WASM: waste_not_ii -> 我們: waste_not_2
+  'byregot_s_blessing': 'byregots_blessing', // WASM: byregot_s_blessing -> 我們: byregots_blessing (注意 's 的位置)
+  'focused_synthesis': 'focused_synthesis',
+  'focused_touch': 'focused_touch',
+  'precise_touch': 'precise_touch',
+  'final_appraisal': 'final_appraisal',
+  'immaculate_mend': 'immaculate_mend',
+  'trained_perfection': 'trained_perfection',
+  'refined_touch': 'refined_touch',
+  'daring_touch': 'daring_touch',
+  'quick_innovation': 'quick_innovation',
+};
+
+/**
  * 將 WASM 動作轉換為本專案的 CraftAction
  */
 function convertWasmActionsToLocal(wasmActions: string[]): CraftAction[] {
   return wasmActions
-    .map(actionId => craftActions.find(a => a.id === actionId))
+    .map(wasmActionId => {
+      // 先嘗試映射
+      const localActionId = wasmActionIdMap[wasmActionId] || wasmActionId;
+      const action = craftActions.find(a => a.id === localActionId);
+      
+      if (!action) {
+        console.warn(`[Solver] 無法找到動作: WASM ID="${wasmActionId}", 映射後="${localActionId}"`);
+      }
+      
+      return action;
+    })
     .filter((a): a is CraftAction => a !== undefined);
 }
 
@@ -728,9 +807,26 @@ function calculateActionPriority(
       if (!hasWasteNot && !hasManipulation && durabilityPercent > 0.5 && qualityPercent < targetPercent * 0.7) score = 140;
       break;
     case 'byregots_blessing':
-      if (iqStacks >= 8 && hasInnovation && hasGreatStrides) score = 200;
-      else if (iqStacks >= 10 && hasInnovation) score = 180;
-      else if (iqStacks >= 10 && qualityPercent < targetPercent) score = 160;
+      // 比爾格的祝福應該在有充足內靜時就使用
+      if (iqStacks >= 8) {
+        // 有改革和闊步時最優
+        if (hasInnovation && hasGreatStrides) score = 250;
+        // 有改革時次優
+        else if (hasInnovation) score = 220;
+        // 品質還不足時
+        else if (qualityPercent < targetPercent) score = 200;
+        // 品質已足但有 10 層內靜時也應該用掉避免浪費
+        else if (iqStacks === 10) score = 180;
+        // 有 8 層內靜且品質低於目標時
+        else if (qualityPercent < targetPercent * 0.8) score = 160;
+      } else if (iqStacks >= 4 && hasInnovation && qualityPercent < targetPercent) {
+        // 有少量內靜且有改革時也考慮
+        score = 130;
+      } else if (iqStacks > 0 && !hasInnovation && qualityPercent < targetPercent) {
+        // 即使只有 1 層內靜且沒有改革，只要品質還不足也應該考慮
+        // 因為比爾格是消耗內靜的最後機會
+        score = 110;
+      }
       break;
     case 'basic_touch':
       if (iqStacks < 10 && qualityPercent < targetPercent) score = hasInnovation ? 100 : 70;

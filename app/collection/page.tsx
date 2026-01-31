@@ -14,6 +14,7 @@ import {
 } from '@/lib/collection/filters';
 import { useAuth } from '@/hooks/use-auth';
 import { useFirestoreCollection } from '@/hooks/use-firestore';
+import { withBasePath } from '@/lib/utils/base-path';
 
 // 每頁顯示數量
 const PAGE_SIZE = 100;
@@ -21,7 +22,7 @@ const PAGE_SIZE = 100;
 // 載入收集資料
 async function loadCollectionsData(): Promise<CollectionsData | null> {
   try {
-    const response = await fetch('/data/collections_data.json');
+    const response = await fetch(withBasePath('/data/collections_data.json'));
     if (!response.ok) throw new Error('Failed to load collections data');
     return await response.json();
   } catch (error) {
