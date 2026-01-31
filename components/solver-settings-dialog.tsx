@@ -7,6 +7,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import Cookies from 'js-cookie';
 import {
   Enhancer,
   MEALS,
@@ -85,14 +86,27 @@ export function SolverSettingsDialog({
   const [qualityInputMode, setQualityInputMode] = useState<'manual' | 'materials'>('manual');
   const [materials, setMaterials] = useState<MaterialWithQuality[]>([]);
   
-  // 求解器選項狀態
-  const [solverOptions, setSolverOptions] = useState<RaphaelSolverOptions>({
-    useManipulation: true,
-    useHeartAndSoul: false,
-    useQuickInnovation: false,
-    useTrainedEye: false,
-    backloadProgress: false,
-    adversarial: false,
+  // 求解器選項狀態（預設全部不勾選；若有 cookie 則載入使用者設定）
+  const SOLVER_OPTIONS_COOKIE_KEY = 'ffxiv-solver-options';
+  const [solverOptions, setSolverOptions] = useState<RaphaelSolverOptions>(() => {
+    const defaults: RaphaelSolverOptions = {
+      useManipulation: false,
+      useHeartAndSoul: false,
+      useQuickInnovation: false,
+      useTrainedEye: false,
+      backloadProgress: false,
+      adversarial: false,
+    };
+    try {
+      const saved = Cookies.get(SOLVER_OPTIONS_COOKIE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return { ...defaults, ...parsed };
+      }
+    } catch (e) {
+      console.warn('Failed to parse solver options from cookie:', e);
+    }
+    return defaults;
   });
 
   // 計算增強後的屬性
