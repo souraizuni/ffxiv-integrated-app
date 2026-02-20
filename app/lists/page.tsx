@@ -172,11 +172,11 @@ export default function RequirementListsPage() {
     selectedList.items.forEach((item) => {
       const priceInfo = prices.get(item.itemId);
       if (priceInfo) {
-        // 優先取 NQ 最低價；若無 NQ 則取 HQ
-        const price = priceInfo.minPriceNQ > 0
-          ? priceInfo.minPriceNQ
-          : priceInfo.minPriceHQ > 0
-            ? priceInfo.minPriceHQ
+        // 優先取 HQ 最低價；若無 HQ 則取 NQ
+        const price = priceInfo.minPriceHQ > 0
+          ? priceInfo.minPriceHQ
+          : priceInfo.minPriceNQ > 0
+            ? priceInfo.minPriceNQ
             : undefined;
         if (price !== undefined) {
           priceUpdates.set(item.itemId, price);
