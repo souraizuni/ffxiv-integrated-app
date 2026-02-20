@@ -336,10 +336,29 @@ function parseCafemakerRecipe(data: CafemakerRecipeResponse): Recipe {
     const amount = data[amountKey] as number;
     
     if (item && item.ID && amount > 0) {
+      // 包含完整的 item 資訊
+      const itemName = item.Name ? simplifiedToTw(item.Name) : `物品 #${item.ID}`;
+      // 判斷是否可以 HQ：優先使用 API 回應的 CanBeHq，否則根據 IsUntradable 判斷
+      const canBeHQ = item.CanBeHq !== undefined ? item.CanBeHq === 1 : item.IsUntradable !== 1;
       ingredients.push({
         itemId: item.ID,
         amount,
         isHQ: false,
+        item: {
+          id: item.ID,
+          name: itemName,
+          name_en: item.Name_en || item.Name || '',
+          name_ja: item.Name || '',
+          name_zh: itemName,
+          icon: item.Icon || '',
+          iconUrl: item.Icon ? getIconUrl(item.Icon) : '',
+          itemLevel: item.LevelItem || 1,
+          stackSize: 999,
+          isUntradable: item.IsUntradable === 1,
+          canBeHQ,
+          categoryId: 0,
+          categoryName: '',
+        },
       });
     }
   }
@@ -375,6 +394,8 @@ function parseCafemakerRecipe(data: CafemakerRecipeResponse): Recipe {
     canQuickSynth: data.CanQuickSynth === 1,
     canHQ: data.CanHq === 1,
     stars: data.RecipeLevelTable?.Stars || 0,
+    // 材料品質係數（用於初期品質計算）
+    materialQualityFactor: data.MaterialQualityFactor || 0,
     // RecipeLevelTable 的基礎值（用於 WASM 求解器）
     baseDifficulty,
     baseDurability,
@@ -394,7 +415,11 @@ function parseCafemakerRecipe(data: CafemakerRecipeResponse): Recipe {
 interface CafemakerIngredientItem {
   ID: number;
   Name?: string;
+  Name_en?: string;
   Icon?: string;
+  LevelItem?: number;
+  IsUntradable?: number;
+  CanBeHq?: number;
 }
 
 // ---- 工具函式 ----
@@ -463,6 +488,7 @@ interface CafemakerRecipeResponse {
   DifficultyFactor?: number;
   DurabilityFactor?: number;
   QualityFactor?: number;
+  MaterialQualityFactor?: number;
   RequiredCraftsmanship?: number;
   RequiredControl?: number;
   CanQuickSynth?: number;

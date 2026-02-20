@@ -17,6 +17,7 @@ import {
 import { raphaelSolver, type RaphaelSolverOptions, type SolverResult } from '@/lib/simulator/solver';
 import { CraftingAnalyzer } from './crafting-analyzer';
 import { MacroExporter } from './macro-exporter';
+import { SolverSettingsDialog } from './solver-settings-dialog';
 import { MEALS, MEDICINES, SOUL_OF_THE_CRAFTER, calculateEnhancedAttributes, getEnhancerEffectText, getEnhancerDisplayName, type Enhancer } from '@/data/enhancers';
 
 // Cookie 鍵名
@@ -83,11 +84,15 @@ export function CraftingSimulator({
   const [solverResult, setSolverResult] = useState<SolverResult | null>(null);
   const [showMacroExport, setShowMacroExport] = useState(false);
   const [showSolverSettings, setShowSolverSettings] = useState(false);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   
   // 食物和藥水設定
   const [selectedMeal, setSelectedMeal] = useState<Enhancer | null>(null);
   const [selectedMedicine, setSelectedMedicine] = useState<Enhancer | null>(null);
   const [useSoulOfCrafter, setUseSoulOfCrafter] = useState(false);
+  
+  // 從進階設定彈窗返回的製作者數值（覆蓋原有設定）
+  const [advancedCrafterStats, setAdvancedCrafterStats] = useState<CrafterStats | null>(null);
   
   // 計算增強後的屬性
   const enhancedStats = useMemo(() => {
@@ -109,8 +114,13 @@ export function CraftingSimulator({
     );
   }, [crafterStats, selectedMeal, selectedMedicine, useSoulOfCrafter]);
   
-  // 用於求解的實際屬性（包含食物/藥水加成）
+  // 用於求解的實際屬性（優先使用進階設定，否則用食物/藥水加成）
   const effectiveStats: CrafterStats = useMemo(() => {
+    // 如果有進階設定的製作者數值，優先使用
+    if (advancedCrafterStats) {
+      return advancedCrafterStats;
+    }
+    // 否則使用基礎屬性 + 食物/藥水加成
     if (!enhancedStats) return crafterStats;
     return {
       ...crafterStats,
@@ -118,7 +128,7 @@ export function CraftingSimulator({
       control: enhancedStats.control,
       cp: enhancedStats.cp,
     };
-  }, [crafterStats, enhancedStats]);
+  }, [crafterStats, enhancedStats, advancedCrafterStats]);
   
   // 當選項改變時儲存到 cookie
   useEffect(() => {
@@ -201,9 +211,22 @@ export function CraftingSimulator({
   };
   
   // 執行求解器
-  const handleSolve = useCallback(async () => {
+  // handleSolve 支援可選的覆蓋參數，解決 stale closure 問題
+  const handleSolve = useCallback(async (overrides?: {
+    stats?: CrafterStats;
+    options?: Partial<RaphaelSolverOptions>;
+  }) => {
     setIsSolving(true);
     setSolverResult(null);
+    
+    // 讓 UI 有時間渲染載入動畫，避免主執行緒被求解器阻塞
+    await new Promise(resolve => setTimeout(resolve, 0));
+    
+    // 使用覆蓋參數或當前狀態
+    const statsToUse = overrides?.stats ?? effectiveStats;
+    const optionsToUse = overrides?.options 
+      ? { ...solverOptions, ...overrides.options }
+      : solverOptions;
     
     // 調試日誌：顯示傳入的配方資訊
     console.log('[CraftingSimulator] handleSolve - Recipe:', {
@@ -220,7 +243,7 @@ export function CraftingSimulator({
     // 調試日誌：顯示使用的屬性（包含食物/藥水加成）
     console.log('[CraftingSimulator] handleSolve - Stats:', {
       base: crafterStats,
-      effective: effectiveStats,
+      effective: statsToUse,
       meal: selectedMeal ? getEnhancerDisplayName(selectedMeal) : undefined,
       medicine: selectedMedicine ? getEnhancerDisplayName(selectedMedicine) : undefined,
     });
@@ -232,10 +255,21 @@ export function CraftingSimulator({
       console.warn('[CraftingSimulator] 警告：baseQuality 等於 quality，RecipeLevelTable 可能未正確載入');
     }
     
+    // 確保載入動畫至少顯示 300ms（避免閃爍）
+    const startTime = Date.now();
+    const MIN_LOADING_TIME = 300;
+    
     try {
       // raphaelSolver 現在是非同步的，支援 WASM 後端
-      // 使用 effectiveStats 包含食物/藥水加成
-      const result = await raphaelSolver(recipe, effectiveStats, solverOptions);
+      // 使用傳入的 stats 和 options
+      const result = await raphaelSolver(recipe, statsToUse, optionsToUse);
+      
+      // 確保載入動畫顯示足夠時間
+      const elapsed = Date.now() - startTime;
+      if (elapsed < MIN_LOADING_TIME) {
+        await new Promise(resolve => setTimeout(resolve, MIN_LOADING_TIME - elapsed));
+      }
+      
       setSolverResult(result);
     } catch (error) {
       console.error('Solver error:', error);
@@ -346,23 +380,34 @@ export function CraftingSimulator({
 
       {/* 製作者數值 */}
       <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm border border-blue-200 dark:border-blue-800">
-        <div className="font-medium mb-1 text-blue-800 dark:text-blue-300">⚒️ 製作者數值</div>
+        <div className="flex items-center justify-between mb-1">
+          <span className="font-medium text-blue-800 dark:text-blue-300">⚒️ 製作者數值</span>
+          {advancedCrafterStats && (
+            <span className="text-xs text-green-600 dark:text-green-400">✓ 已套用進階設定</span>
+          )}
+        </div>
         <div className="grid grid-cols-4 gap-2 text-xs">
           <div className="flex flex-col">
             <span className="text-gray-500">等級</span>
-            <span className="font-medium text-gray-900 dark:text-white">{crafterStats.level}</span>
+            <span className="font-medium text-gray-900 dark:text-white">{effectiveStats.level}</span>
           </div>
           <div className="flex flex-col">
             <span className="text-gray-500">作業精度</span>
-            <span className="font-medium text-gray-900 dark:text-white">{crafterStats.craftsmanship}</span>
+            <span className={`font-medium ${advancedCrafterStats && advancedCrafterStats.craftsmanship !== crafterStats.craftsmanship ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white'}`}>
+              {effectiveStats.craftsmanship}
+            </span>
           </div>
           <div className="flex flex-col">
             <span className="text-gray-500">加工精度</span>
-            <span className="font-medium text-gray-900 dark:text-white">{crafterStats.control}</span>
+            <span className={`font-medium ${advancedCrafterStats && advancedCrafterStats.control !== crafterStats.control ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white'}`}>
+              {effectiveStats.control}
+            </span>
           </div>
           <div className="flex flex-col">
             <span className="text-gray-500">CP(製作力)</span>
-            <span className="font-medium text-gray-900 dark:text-white">{crafterStats.cp}</span>
+            <span className={`font-medium ${advancedCrafterStats && advancedCrafterStats.cp !== crafterStats.cp ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white'}`}>
+              {effectiveStats.cp}
+            </span>
           </div>
         </div>
       </div>
@@ -379,7 +424,16 @@ export function CraftingSimulator({
       
       {/* 求解器分頁 */}
       {activeTab === 'solver' && (
-        <div className="space-y-4">
+        <div className="space-y-4 relative min-h-[200px]">
+          {/* 求解中載入遮罩 */}
+          {isSolving && (
+            <div className="absolute inset-0 bg-white/80 dark:bg-gray-900/80 z-10 flex flex-col items-center justify-center rounded-lg backdrop-blur-sm min-h-[200px]">
+              <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mb-4" />
+              <div className="text-lg font-medium text-purple-600 dark:text-purple-400">求解中...</div>
+              <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">正在計算最佳技能序列</div>
+            </div>
+          )}
+          
           {/* 求解結果（放最上方） */}
           {solverResult && (
             <div className="space-y-4">
@@ -387,31 +441,48 @@ export function CraftingSimulator({
               <div className="p-4 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
                 <div className="flex items-center justify-between mb-4">
                   <h4 className="font-semibold">求解結果</h4>
-                  <span className={`px-2 py-1 rounded text-xs ${
-                    solverResult.success
-                      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                      : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                  }`}>
-                    {solverResult.success ? '成功' : '失敗'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-500">步數: <span className="font-bold text-blue-600">{solverResult.steps}</span></span>
+                    <span className={`px-2 py-1 rounded text-xs ${
+                      solverResult.success
+                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                        : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                    }`}>
+                      {solverResult.success ? '成功' : '失敗'}
+                    </span>
+                  </div>
                 </div>
                 
-                <div className="grid grid-cols-3 gap-3 mb-4">
-                  <div className="p-2 bg-gray-50 dark:bg-gray-800 rounded text-center">
-                    <div className="text-xs text-gray-500">HQ 機率</div>
-                    <div className="text-lg font-bold text-amber-600">{solverResult.hqChance}%</div>
-                  </div>
-                  <div className="p-2 bg-gray-50 dark:bg-gray-800 rounded text-center">
-                    <div className="text-xs text-gray-500">步數</div>
-                    <div className="text-lg font-bold text-blue-600">{solverResult.steps}</div>
-                  </div>
-                  <div className="p-2 bg-gray-50 dark:bg-gray-800 rounded text-center">
-                    <div className="text-xs text-gray-500">品質</div>
-                    <div className="text-lg font-bold text-purple-600">
-                      {Math.round((solverResult.finalState.quality / recipe.quality) * 100)}%
+                {/* 進度條顯示 */}
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <StatusBar
+                    label="進度"
+                    current={solverResult.finalState.progress}
+                    max={recipe.difficulty}
+                    color="blue"
+                  />
+                  <StatusBar
+                    label={recipe.isCollectable ? "品質 (收藏品)" : "品質"}
+                    current={solverResult.finalState.quality}
+                    max={recipe.quality}
+                    color="amber"
+                    collectabilityThresholds={recipe.isCollectable && recipe.collectability ? {
+                      low: recipe.collectability.low * 10,
+                      mid: recipe.collectability.mid * 10,
+                      high: recipe.collectability.high * 10,
+                    } : undefined}
+                  />
+                </div>
+                
+                {/* HQ 機率（非收藏品時顯示） */}
+                {!recipe.isCollectable && (
+                  <div className="mb-4 p-2 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">HQ 機率</span>
+                      <span className="text-lg font-bold text-amber-600 dark:text-amber-400">{solverResult.hqChance}%</span>
                     </div>
                   </div>
-                </div>
+                )}
                 
                 {/* 技能序列預覽 */}
                 <div className="mb-4">
@@ -730,27 +801,91 @@ export function CraftingSimulator({
               </div>
             )}
             
-            {/* 求解按鈕（總是顯示） */}
-            <button
-              onClick={handleSolve}
-              disabled={isSolving}
-              className="w-full mt-4 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {isSolving ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  求解中...
-                </>
-              ) : (
-                <>
-                  <span>🚀</span>
-                  開始求解
-                </>
-              )}
-            </button>
+            {/* 按鈕區域 */}
+            <div className="flex gap-2 mt-4">
+              {/* 進階設定按鈕 */}
+              <button
+                onClick={() => setShowAdvancedSettings(true)}
+                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 flex items-center justify-center gap-2"
+              >
+                <span>⚙️</span>
+                進階設定
+              </button>
+              
+              {/* 求解按鈕 */}
+              <button
+                onClick={() => handleSolve()}
+                disabled={isSolving}
+                className="flex-1 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isSolving ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    求解中...
+                  </>
+                ) : (
+                  <>
+                    <span>🚀</span>
+                    開始求解
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
+
+      {/* 進階設定彈窗 */}
+      <SolverSettingsDialog
+        isOpen={showAdvancedSettings}
+        onClose={() => setShowAdvancedSettings(false)}
+        recipe={recipe}
+        initialCrafterStats={advancedCrafterStats || crafterStats}
+        isSolving={isSolving}
+        onApply={(settings) => {
+          // 更新製作者數值
+          setAdvancedCrafterStats(settings.crafterStats);
+          // 更新求解器選項
+          setSolverOptions(prev => ({
+            ...prev,
+            ...settings.solverOptions,
+          }));
+          setShowAdvancedSettings(false);
+        }}
+        onSolve={(settings) => {
+          // 更新狀態以保持 UI 同步
+          setAdvancedCrafterStats(settings.crafterStats);
+          setSolverOptions(prev => ({
+            ...prev,
+            ...settings.solverOptions,
+          }));
+          setShowAdvancedSettings(false);
+          
+          // 計算新的 enhancedStats（避免 stale closure）
+          const enhancers: Enhancer[] = [];
+          if (selectedMeal) enhancers.push(selectedMeal);
+          if (selectedMedicine) enhancers.push(selectedMedicine);
+          
+          const enhanced = calculateEnhancedAttributes(
+            settings.crafterStats,
+            enhancers
+          );
+          
+          // 合併為完整的 CrafterStats
+          const newEnhancedStats: CrafterStats = {
+            ...settings.crafterStats,
+            craftsmanship: enhanced.craftsmanship,
+            control: enhanced.control,
+            cp: enhanced.cp,
+          };
+          
+          // 直接傳入參數執行求解，避免 stale closure 問題
+          handleSolve({
+            stats: newEnhancedStats,
+            options: settings.solverOptions,
+          });
+        }}
+      />
 
       {/* 模擬器分頁 */}
       {activeTab === 'simulator' && (

@@ -7,6 +7,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import Cookies from 'js-cookie';
 import {
   Enhancer,
   MEALS,
@@ -18,6 +19,7 @@ import {
   CRAFTER_PRESETS,
 } from '@/data/enhancers';
 import type { Recipe, CrafterStats, RecipeIngredient } from '@/types';
+import type { RaphaelSolverOptions } from '@/lib/simulator/solver';
 
 // ============================================
 // 類型定義
@@ -32,16 +34,8 @@ export interface MaterialWithQuality {
   canBeHQ: boolean;
 }
 
-export interface RaphaelSolverOptions {
-  initialQuality?: number;
-  targetQuality?: number | 'full';
-  useManipulation?: boolean;
-  useHeartAndSoul?: boolean;
-  useQuickInnovation?: boolean;
-  useTrainedEye?: boolean;
-  backloadProgress?: boolean;
-  adversarial?: boolean;
-}
+// Re-export for convenience
+export type { RaphaelSolverOptions } from '@/lib/simulator/solver';
 
 export interface SolverSettingsDialogProps {
   isOpen: boolean;
@@ -82,19 +76,37 @@ export function SolverSettingsDialog({
   // 製作者數值狀態
   const [crafterStats, setCrafterStats] = useState<CrafterStats>(initialCrafterStats);
   
+  // 當外部 crafterStats 改變時同步更新
+  useEffect(() => {
+    setCrafterStats(initialCrafterStats);
+  }, [initialCrafterStats]);
+  
   // 初期品質狀態
   const [initialQuality, setInitialQuality] = useState(0);
   const [qualityInputMode, setQualityInputMode] = useState<'manual' | 'materials'>('manual');
   const [materials, setMaterials] = useState<MaterialWithQuality[]>([]);
   
-  // 求解器選項狀態
-  const [solverOptions, setSolverOptions] = useState<RaphaelSolverOptions>({
-    useManipulation: true,
-    useHeartAndSoul: false,
-    useQuickInnovation: false,
-    useTrainedEye: false,
-    backloadProgress: false,
-    adversarial: false,
+  // 求解器選項狀態（預設全部不勾選；若有 cookie 則載入使用者設定）
+  const SOLVER_OPTIONS_COOKIE_KEY = 'ffxiv-solver-options';
+  const [solverOptions, setSolverOptions] = useState<RaphaelSolverOptions>(() => {
+    const defaults: RaphaelSolverOptions = {
+      useManipulation: false,
+      useHeartAndSoul: false,
+      useQuickInnovation: false,
+      useTrainedEye: false,
+      backloadProgress: false,
+      adversarial: false,
+    };
+    try {
+      const saved = Cookies.get(SOLVER_OPTIONS_COOKIE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return { ...defaults, ...parsed };
+      }
+    } catch (e) {
+      console.warn('Failed to parse solver options from cookie:', e);
+    }
+    return defaults;
   });
 
   // 計算增強後的屬性
@@ -112,11 +124,12 @@ export function SolverSettingsDialog({
     if (recipe.ingredients) {
       const mats: MaterialWithQuality[] = recipe.ingredients.map((ing: RecipeIngredient) => ({
         itemId: ing.itemId,
-        itemName: ing.item?.name_zh || `物品 #${ing.itemId}`,
+        itemName: ing.item?.name_zh || ing.item?.name || `物品 #${ing.itemId}`,
         itemLevel: ing.item?.itemLevel || 1,
         amount: ing.amount,
         hqAmount: 0,
-        canBeHQ: !ing.item?.isUntradable, // 簡化判斷：可交易的通常可以HQ
+        // 優先使用 canBeHQ 欄位，否則根據 isUntradable 判斷
+        canBeHQ: ing.item?.canBeHQ !== undefined ? ing.item.canBeHQ : !ing.item?.isUntradable,
       }));
       setMaterials(mats);
     }
@@ -145,22 +158,35 @@ export function SolverSettingsDialog({
 
   // 處理應用設定
   const handleApply = useCallback(() => {
+    // 合併增強後的屬性與原始 crafterStats（保留 job, specialist 等）
+    const finalStats: CrafterStats = {
+      ...crafterStats,
+      craftsmanship: enhancedStats.craftsmanship,
+      control: enhancedStats.control,
+      cp: enhancedStats.cp,
+    };
     onApply({
-      crafterStats: enhancedStats,
+      crafterStats: finalStats,
       solverOptions: { ...solverOptions, initialQuality },
     });
     onClose();
-  }, [enhancedStats, solverOptions, initialQuality, onApply, onClose]);
+  }, [crafterStats, enhancedStats, solverOptions, initialQuality, onApply, onClose]);
 
   // 處理開始求解
   const handleSolve = useCallback(() => {
     if (onSolve) {
+      const finalStats: CrafterStats = {
+        ...crafterStats,
+        craftsmanship: enhancedStats.craftsmanship,
+        control: enhancedStats.control,
+        cp: enhancedStats.cp,
+      };
       onSolve({
-        crafterStats: enhancedStats,
+        crafterStats: finalStats,
         solverOptions: { ...solverOptions, initialQuality },
       });
     }
-  }, [enhancedStats, solverOptions, initialQuality, onSolve]);
+  }, [crafterStats, enhancedStats, solverOptions, initialQuality, onSolve]);
 
   if (!isOpen) return null;
 
@@ -340,6 +366,30 @@ function TabButton({ active, onClick, children }: TabButtonProps) {
 // 食物藥水標籤頁
 // ============================================
 
+// 暫存設定的 localStorage 鍵
+const ENHANCER_PRESET_KEY = 'ffxiv-enhancer-preset';
+
+interface EnhancerPreset {
+  mealId?: number;
+  medicineId?: number;
+  useSoulOfCrafter: boolean;
+}
+
+function loadEnhancerPreset(): EnhancerPreset | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const saved = localStorage.getItem(ENHANCER_PRESET_KEY);
+    return saved ? JSON.parse(saved) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveEnhancerPreset(preset: EnhancerPreset): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(ENHANCER_PRESET_KEY, JSON.stringify(preset));
+}
+
 interface EnhancersTabProps {
   meal?: Enhancer;
   medicine?: Enhancer;
@@ -361,33 +411,112 @@ function EnhancersTab({
   baseStats,
   enhancedStats,
 }: EnhancersTabProps) {
+  const [hasPreset, setHasPreset] = useState(false);
+  
+  // 檢查是否有暫存的設定
+  useEffect(() => {
+    const preset = loadEnhancerPreset();
+    setHasPreset(preset !== null && (preset.mealId !== undefined || preset.medicineId !== undefined || preset.useSoulOfCrafter));
+  }, []);
+
+  // 儲存當前設定
+  const handleSavePreset = () => {
+    saveEnhancerPreset({
+      mealId: meal?.id,
+      medicineId: medicine?.id,
+      useSoulOfCrafter,
+    });
+    setHasPreset(true);
+  };
+
+  // 載入暫存設定
+  const handleLoadPreset = () => {
+    const preset = loadEnhancerPreset();
+    if (preset) {
+      if (preset.mealId) {
+        const savedMeal = MEALS.find(m => m.id === preset.mealId);
+        onMealChange(savedMeal);
+      } else {
+        onMealChange(undefined);
+      }
+      if (preset.medicineId) {
+        const savedMedicine = MEDICINES.find(m => m.id === preset.medicineId);
+        onMedicineChange(savedMedicine);
+      } else {
+        onMedicineChange(undefined);
+      }
+      onSoulOfCrafterChange(preset.useSoulOfCrafter);
+    }
+  };
+
+  // 清除所有設定
+  const handleClearAll = () => {
+    onMealChange(undefined);
+    onMedicineChange(undefined);
+    onSoulOfCrafterChange(false);
+  };
+
   return (
     <div className="space-y-6">
+      {/* 快速操作按鈕 */}
+      <div className="flex gap-2">
+        <button
+          onClick={handleLoadPreset}
+          disabled={!hasPreset}
+          className="flex-1 rounded-lg bg-blue-100 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-200 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50 dark:disabled:bg-gray-800 dark:disabled:text-gray-500"
+        >
+          ⚡ 快速載入
+        </button>
+        <button
+          onClick={handleSavePreset}
+          className="flex-1 rounded-lg bg-green-100 px-3 py-2 text-sm font-medium text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50"
+        >
+          💾 儲存設定
+        </button>
+        <button
+          onClick={handleClearAll}
+          className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+        >
+          ✕ 清除
+        </button>
+      </div>
+
       {/* 食物選擇 */}
       <div className="space-y-2">
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
           食物
         </label>
-        <select
-          value={meal?.id ?? 0}
-          onChange={(e) => {
-            const id = parseInt(e.target.value);
-            if (id === 0) {
-              onMealChange(undefined);
-            } else {
-              const selected = MEALS.find(m => m.id === id);
-              onMealChange(selected);
-            }
-          }}
-          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-        >
-          <option value={0}>無</option>
-          {MEALS.map((m) => (
-            <option key={m.id} value={m.id}>
-              {getEnhancerDisplayName(m)} - {getEnhancerEffectText(m)}
-            </option>
-          ))}
-        </select>
+        <div className="flex gap-2">
+          <select
+            value={meal?.id ?? 0}
+            onChange={(e) => {
+              const id = parseInt(e.target.value);
+              if (id === 0) {
+                onMealChange(undefined);
+              } else {
+                const selected = MEALS.find(m => m.id === id);
+                onMealChange(selected);
+              }
+            }}
+            className="flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+          >
+            <option value={0}>無</option>
+            {MEALS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {getEnhancerDisplayName(m)} - {getEnhancerEffectText(m)}
+              </option>
+            ))}
+          </select>
+          {meal && (
+            <button
+              onClick={() => onMealChange(undefined)}
+              className="rounded-md bg-gray-100 px-3 py-2 text-gray-500 hover:bg-gray-200 hover:text-gray-700 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600 dark:hover:text-gray-200"
+              title="清除食物"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 藥水選擇 */}
@@ -395,38 +524,49 @@ function EnhancersTab({
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
           藥水
         </label>
-        <select
-          value={medicine?.id ?? 0}
-          onChange={(e) => {
-            const id = parseInt(e.target.value);
-            if (id === 0) {
-              onMedicineChange(undefined);
-            } else {
-              const selected = MEDICINES.find(m => m.id === id);
-              onMedicineChange(selected);
-            }
-          }}
-          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-        >
-          <option value={0}>無</option>
-          {MEDICINES.map((m) => (
-            <option key={m.id} value={m.id}>
-              {getEnhancerDisplayName(m)} - {getEnhancerEffectText(m)}
-            </option>
-          ))}
-        </select>
+        <div className="flex gap-2">
+          <select
+            value={medicine?.id ?? 0}
+            onChange={(e) => {
+              const id = parseInt(e.target.value);
+              if (id === 0) {
+                onMedicineChange(undefined);
+              } else {
+                const selected = MEDICINES.find(m => m.id === id);
+                onMedicineChange(selected);
+              }
+            }}
+            className="flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+          >
+            <option value={0}>無</option>
+            {MEDICINES.map((m) => (
+              <option key={m.id} value={m.id}>
+                {getEnhancerDisplayName(m)} - {getEnhancerEffectText(m)}
+              </option>
+            ))}
+          </select>
+          {medicine && (
+            <button
+              onClick={() => onMedicineChange(undefined)}
+              className="rounded-md bg-gray-100 px-3 py-2 text-gray-500 hover:bg-gray-200 hover:text-gray-700 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600 dark:hover:text-gray-200"
+              title="清除藥水"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 專家之證 */}
-      <div className="flex items-center justify-between">
-        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          專家之證
+      <div className="flex items-center justify-between rounded-lg bg-amber-50 p-3 dark:bg-amber-900/20">
+        <label className="text-sm font-medium text-amber-800 dark:text-amber-300">
+          ⭐ 專家之證
         </label>
         <input
           type="checkbox"
           checked={useSoulOfCrafter}
           onChange={(e) => onSoulOfCrafterChange(e.target.checked)}
-          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          className="h-5 w-5 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
         />
       </div>
 
@@ -674,31 +814,6 @@ function QualityTab({
 
   return (
     <div className="space-y-6">
-      {/* 輸入模式選擇 */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => onInputModeChange('manual')}
-          className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-            inputMode === 'manual'
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
-          }`}
-        >
-          手動輸入
-        </button>
-        <button
-          onClick={() => onInputModeChange('materials')}
-          disabled={materials.length === 0}
-          className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-            inputMode === 'materials'
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
-          }`}
-        >
-          HQ材料計算
-        </button>
-      </div>
-
       {/* 當前初期品質顯示 */}
       <div className="rounded-md border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900">
         <div className="mb-2 flex items-center justify-between">
@@ -722,59 +837,8 @@ function QualityTab({
         )}
       </div>
 
-      {/* 手動輸入模式 */}
-      {inputMode === 'manual' && (
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-              品質數值
-            </label>
-            <input
-              type="number"
-              min={0}
-              max={recipe.quality}
-              value={initialQuality}
-              onChange={(e) => onInitialQualityChange(Math.min(Math.max(0, parseInt(e.target.value) || 0), recipe.quality))}
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-            />
-          </div>
-          
-          <input
-            type="range"
-            min={0}
-            max={recipe.quality}
-            value={initialQuality}
-            onChange={(e) => onInitialQualityChange(parseInt(e.target.value))}
-            className="w-full"
-          />
-
-          {maxInitialQuality > 0 && (
-            <div className="flex gap-2">
-              <button
-                onClick={() => onInitialQualityChange(0)}
-                className="flex-1 rounded-md bg-gray-100 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-              >
-                0%
-              </button>
-              <button
-                onClick={() => onInitialQualityChange(Math.floor(maxInitialQuality * 0.5))}
-                className="flex-1 rounded-md bg-gray-100 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-              >
-                50%
-              </button>
-              <button
-                onClick={() => onInitialQualityChange(maxInitialQuality)}
-                className="flex-1 rounded-md bg-gray-100 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-              >
-                100%
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* HQ材料計算模式 */}
-      {inputMode === 'materials' && (
+      {/* HQ材料計算 */}
+      {materials.length > 0 ? (
         <div className="space-y-4">
           {/* 快捷按鈕 */}
           <div className="flex gap-2">
@@ -846,14 +910,12 @@ function QualityTab({
               </div>
             ))}
           </div>
-
-          {materials.length === 0 && (
-            <div className="rounded-lg border border-gray-200 bg-gray-50 p-8 text-center dark:border-gray-700 dark:bg-gray-900">
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                此配方無材料資訊，請使用手動輸入模式
-              </p>
-            </div>
-          )}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-8 text-center dark:border-gray-700 dark:bg-gray-900">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            此配方無材料資訊
+          </p>
         </div>
       )}
     </div>

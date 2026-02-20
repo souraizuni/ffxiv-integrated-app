@@ -360,6 +360,13 @@ export interface CrafterPreset {
 
 export const CRAFTER_PRESETS: CrafterPreset[] = [
   {
+    name: '7.1 商店裝',
+    level: 100,
+    craftsmanship: 4628,
+    control: 4221,
+    cp: 533,
+  },
+  {
     name: '7.1 畢業裝 (HQ 全附魔)',
     level: 100,
     craftsmanship: 5182,

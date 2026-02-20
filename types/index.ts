@@ -15,6 +15,7 @@ export interface Item {
   itemLevel: number;
   stackSize: number;
   isUntradable: boolean;
+  canBeHQ?: boolean;  // 是否可以 HQ
   categoryId: number;
   categoryName: string;
 }
