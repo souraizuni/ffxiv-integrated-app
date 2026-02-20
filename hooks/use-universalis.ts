@@ -1,11 +1,221 @@
 // ============================================
-// Universalis 市場資料 Hooks
+// Universalis 市場資料 Hooks & 工具函式
 // ============================================
 
 import useSWR from 'swr';
 import type { MarketData, MarketListing, MarketHistoryEntry } from '@/types';
 
 const UNIVERSALIS_BASE = 'https://universalis.app/api/v2';
+
+// ============================================
+// 伺服器設定相關
+// ============================================
+
+export interface DataCenter {
+  name: string;
+  region: string;
+  worlds: number[];
+}
+
+export interface World {
+  id: number;
+  name: string;
+}
+
+// 預設伺服器設定
+export const DEFAULT_SERVER_CONFIG = {
+  dcName: '陸行鳥',
+  worldId: 4031,
+  worldName: '鳳凰',
+};
+
+const SERVER_CONFIG_KEY = 'ffxiv-server-config';
+
+export function loadServerConfig(): { dcName: string; worldId: number; worldName: string } {
+  try {
+    const raw = localStorage.getItem(SERVER_CONFIG_KEY);
+    if (raw) {
+      const config = JSON.parse(raw);
+      return {
+        dcName: config.dcName || DEFAULT_SERVER_CONFIG.dcName,
+        worldId: config.worldId || DEFAULT_SERVER_CONFIG.worldId,
+        worldName: config.worldName || DEFAULT_SERVER_CONFIG.worldName,
+      };
+    }
+  } catch {}
+  return { ...DEFAULT_SERVER_CONFIG };
+}
+
+export function saveServerConfig(config: { dcName: string; worldId: number; worldName: string }): void {
+  try {
+    localStorage.setItem(SERVER_CONFIG_KEY, JSON.stringify(config));
+  } catch (e) {
+    console.error('儲存伺服器設定失敗:', e);
+  }
+}
+
+// 取得資料中心與伺服器列表
+export async function fetchDataCentersAndWorlds(): Promise<{
+  dataCenters: DataCenter[];
+  worlds: World[];
+}> {
+  const [dcs, worlds] = await Promise.all([
+    fetcher<DataCenter[]>(`${UNIVERSALIS_BASE}/data-centers`),
+    fetcher<World[]>(`${UNIVERSALIS_BASE}/worlds`),
+  ]);
+  return { dataCenters: dcs, worlds };
+}
+
+// ============================================
+// 市場價格批次查詢（命令式，非 Hook）
+// ============================================
+
+export interface MarketPriceInfo {
+  itemId: number;
+  minPriceNQ: number;
+  minPriceHQ: number;
+  currentAveragePriceNQ: number;
+  currentAveragePriceHQ: number;
+  currentAveragePrice: number;
+  listings: Array<{
+    pricePerUnit: number;
+    quantity: number;
+    total: number;
+    hq: boolean;
+    worldName?: string;
+    retainerName?: string;
+  }>;
+  lastUploadTime: number;
+}
+
+/**
+ * 批次查詢多個物品的市場價格
+ * @param worldOrDC 伺服器名稱、ID、資料中心名稱或地區名稱
+ * @param itemIds 要查詢的物品 ID 陣列
+ * @param onProgress 進度回呼
+ */
+export async function fetchMarketPrices(
+  worldOrDC: string | number,
+  itemIds: number[],
+  onProgress?: (current: number, total: number) => void
+): Promise<Map<number, MarketPriceInfo>> {
+  const result = new Map<number, MarketPriceInfo>();
+  if (itemIds.length === 0) return result;
+
+  const uniqueIds = [...new Set(itemIds)];
+  const BATCH_SIZE = 100;
+  const batches: number[][] = [];
+
+  for (let i = 0; i < uniqueIds.length; i += BATCH_SIZE) {
+    batches.push(uniqueIds.slice(i, i + BATCH_SIZE));
+  }
+
+  let processed = 0;
+
+  for (let bi = 0; bi < batches.length; bi++) {
+    const batch = batches[bi];
+    const idsString = batch.join(',');
+    const url = `${UNIVERSALIS_BASE}/${worldOrDC}/${idsString}?listings=20&entries=10`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+
+      if (batch.length === 1) {
+        // 單一物品回應（扁平結構）
+        if (data.itemID) {
+          result.set(data.itemID, parseMarketPriceInfo(data));
+        }
+      } else {
+        // 多物品回應（巢狀在 items 中）
+        if (data.items) {
+          for (const [itemId, itemData] of Object.entries(data.items)) {
+            result.set(Number(itemId), parseMarketPriceInfo(itemData as Record<string, unknown>));
+          }
+        }
+      }
+    } catch (e) {
+      console.error(`批次查詢市場價格失敗 (batch ${bi + 1}/${batches.length}):`, e);
+    }
+
+    processed += batch.length;
+    onProgress?.(processed, uniqueIds.length);
+
+    // 速率限制：批次間等待
+    if (bi < batches.length - 1) {
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+
+  return result;
+}
+
+function parseMarketPriceInfo(data: Record<string, unknown>): MarketPriceInfo {
+  const listings = Array.isArray(data.listings) ? data.listings : [];
+  return {
+    itemId: (data.itemID as number) || 0,
+    minPriceNQ: (data.minPriceNQ as number) || 0,
+    minPriceHQ: (data.minPriceHQ as number) || 0,
+    currentAveragePriceNQ: (data.currentAveragePriceNQ as number) || 0,
+    currentAveragePriceHQ: (data.currentAveragePriceHQ as number) || 0,
+    currentAveragePrice: (data.currentAveragePrice as number) || 0,
+    listings: listings.map((l: Record<string, unknown>) => ({
+      pricePerUnit: (l.pricePerUnit as number) || 0,
+      quantity: (l.quantity as number) || 0,
+      total: (l.total as number) || 0,
+      hq: (l.hq as boolean) || false,
+      worldName: (l.worldName as string) || '',
+      retainerName: (l.retainerName as string) || '',
+    })),
+    lastUploadTime: (data.lastUploadTime as number) || 0,
+  };
+}
+
+/**
+ * 根據需要的數量計算智慧購買成本
+ * 從最低價的上架開始累計，直到滿足需求量
+ */
+export function calculateSmartCost(
+  listings: MarketPriceInfo['listings'],
+  quantityNeeded: number,
+  preferHQ: boolean = false
+): { avgUnitCost: number; totalCost: number; listingsUsed: number; fullyAvailable: boolean } {
+  if (quantityNeeded <= 0 || listings.length === 0) {
+    return { avgUnitCost: 0, totalCost: 0, listingsUsed: 0, fullyAvailable: false };
+  }
+
+  // 依品質篩選，然後按價格排序
+  const filtered = listings
+    .filter((l) => (preferHQ ? l.hq : !l.hq) || listings.every((ll) => ll.hq === l.hq))
+    .sort((a, b) => a.pricePerUnit - b.pricePerUnit);
+
+  // 如果沒有符合條件的，用全部
+  const sorted = filtered.length > 0
+    ? filtered
+    : [...listings].sort((a, b) => a.pricePerUnit - b.pricePerUnit);
+
+  let remaining = quantityNeeded;
+  let totalCost = 0;
+  let listingsUsed = 0;
+
+  for (const listing of sorted) {
+    if (remaining <= 0) break;
+    const buyQty = Math.min(remaining, listing.quantity);
+    totalCost += buyQty * listing.pricePerUnit;
+    remaining -= buyQty;
+    listingsUsed++;
+  }
+
+  // 如果市場庫存不足，剩餘的用最後一個價格
+  const fullyAvailable = remaining <= 0;
+  if (remaining > 0 && sorted.length > 0) {
+    totalCost += remaining * sorted[sorted.length - 1].pricePerUnit;
+  }
+
+  const avgUnitCost = quantityNeeded > 0 ? Math.round(totalCost / quantityNeeded) : 0;
+  return { avgUnitCost, totalCost, listingsUsed, fullyAvailable };
+}
 
 // ---- Fetcher 函式 ----
 async function fetcher<T>(url: string): Promise<T> {

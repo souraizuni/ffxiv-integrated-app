@@ -8,6 +8,7 @@ export { RecipePanel } from './recipe-panel';
 export { Navigation, Sidebar } from './navigation';
 export { ItemSourceInfo, ItemSourceInfoPanel, ItemSourceBadges } from './item-source-info';
 export { MaterialCostCalculator } from './material-cost-calculator';
+export { ServerSelector, useServerConfig } from './server-selector';
 export {
   SolverOptionsPanel,
   EnhancerSelector,

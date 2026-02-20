@@ -2,6 +2,12 @@
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import type { FlattenedMaterial, MaterialTreeNode } from '@/types';
+import { ServerSelector, useServerConfig } from './server-selector';
+import {
+  fetchMarketPrices,
+  calculateSmartCost,
+  type MarketPriceInfo,
+} from '@/hooks/use-universalis';
 
 // 材料來源選擇：購買或自製
 type MaterialSource = 'buy' | 'craft';
@@ -89,6 +95,16 @@ export function MaterialCostCalculator({
 
   // 瓶頸分析開關
   const [showBottleneck, setShowBottleneck] = useState(false);
+
+  // 伺服器設定
+  const serverConfig = useServerConfig();
+
+  // 市場價格資料
+  const [marketPrices, setMarketPrices] = useState<Map<number, MarketPriceInfo>>(new Map());
+  const [isFetchingPrices, setIsFetchingPrices] = useState(false);
+  const [fetchProgress, setFetchProgress] = useState({ current: 0, total: 0 });
+  const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
+  const [productMarketPrice, setProductMarketPrice] = useState<MarketPriceInfo | null>(null);
 
   // 載入外部資料（從生產紀錄）
   useEffect(() => {
@@ -284,6 +300,84 @@ export function MaterialCostCalculator({
 
     return requirements;
   }, [actualMaterials, materialTree, costEntries, multiplier, craftableMaterials]);
+
+  // 查詢所有材料的市場價格
+  const fetchAllMarketPrices = useCallback(async () => {
+    setIsFetchingPrices(true);
+    setFetchProgress({ current: 0, total: 0 });
+
+    try {
+      // 收集所有需要查詢的物品 ID（包含成品）
+      const itemIds: number[] = [];
+      actualMaterials.forEach((m) => {
+        itemIds.push(m.itemId);
+      });
+      // 加入成品 ID
+      if (materialTree) {
+        itemIds.push(materialTree.itemId);
+      }
+
+      const uniqueIds = [...new Set(itemIds)];
+      const prices = await fetchMarketPrices(
+        serverConfig.worldId,
+        uniqueIds,
+        (current, total) => setFetchProgress({ current, total })
+      );
+
+      setMarketPrices(prices);
+      setLastFetchTime(new Date());
+
+      // 提取成品的市場價格
+      if (materialTree) {
+        const productPrice = prices.get(materialTree.itemId);
+        setProductMarketPrice(productPrice || null);
+      }
+
+      // 自動填入最低價格到成本條目
+      setCostEntries((prev) => {
+        const newMap = new Map(prev);
+        actualMaterials.forEach((m) => {
+          const priceInfo = prices.get(m.itemId);
+          const entry = newMap.get(m.itemId);
+          if (priceInfo && entry) {
+            // 根據是否為 HQ 選擇對應的最低價
+            const isHQ = entry.isHQ || false;
+            const minPrice = isHQ ? priceInfo.minPriceHQ : priceInfo.minPriceNQ;
+            
+            // 如果有 listings，使用智慧成本計算
+            const requiredQty = actualRequirements.get(m.itemId) || m.totalAmount * multiplier;
+            if (priceInfo.listings.length > 0 && requiredQty > 0) {
+              const smart = calculateSmartCost(priceInfo.listings, requiredQty, isHQ);
+              newMap.set(m.itemId, {
+                ...entry,
+                unitPrice: smart.avgUnitCost > 0 ? smart.avgUnitCost : (minPrice || 0),
+                purchaseQty: requiredQty,
+              });
+            } else {
+              newMap.set(m.itemId, {
+                ...entry,
+                unitPrice: minPrice || 0,
+                purchaseQty: requiredQty,
+              });
+            }
+          }
+        });
+        return newMap;
+      });
+
+      // 自動填入成品售價
+      if (materialTree) {
+        const productPrice = prices.get(materialTree.itemId);
+        if (productPrice && productPrice.minPriceNQ > 0) {
+          setSellPrice(productPrice.minPriceNQ);
+        }
+      }
+    } catch (e) {
+      console.error('查詢市場價格失敗:', e);
+    } finally {
+      setIsFetchingPrices(false);
+    }
+  }, [actualMaterials, materialTree, serverConfig.worldId, multiplier, actualRequirements]);
 
   // 計算總成本（使用實際購買數量）
   const calculations = useMemo(() => {
@@ -520,6 +614,14 @@ export function MaterialCostCalculator({
 
   return (
     <div className="space-y-4">
+      {/* 伺服器選擇 */}
+      <ServerSelector
+        compact
+        onServerChange={(worldId, worldName, dcName) => {
+          serverConfig.updateConfig(worldId, worldName, dcName);
+        }}
+      />
+
       {/* 控制列 */}
       <div className="flex flex-wrap items-center gap-3 p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
         <div className="flex items-center gap-2">
@@ -569,6 +671,40 @@ export function MaterialCostCalculator({
         </label>
       </div>
 
+      {/* 一鍵查價按鈕 */}
+      <div className="flex flex-wrap items-center gap-3 p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-200 dark:border-indigo-800">
+        <button
+          onClick={fetchAllMarketPrices}
+          disabled={isFetchingPrices}
+          className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+        >
+          {isFetchingPrices ? (
+            <>
+              <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              查詢中 ({fetchProgress.current}/{fetchProgress.total})
+            </>
+          ) : (
+            <>
+              📊 一鍵查詢市場價格
+            </>
+          )}
+        </button>
+        <span className="text-xs text-gray-500 dark:text-gray-400">
+          自動取得 {serverConfig.worldName} 伺服器的最低價並填入
+        </span>
+        {lastFetchTime && (
+          <span className="text-xs text-green-600 dark:text-green-400">
+            ✅ 上次查詢：{lastFetchTime.toLocaleTimeString()}
+          </span>
+        )}
+        {productMarketPrice && productMarketPrice.minPriceNQ > 0 && (
+          <span className="text-xs text-amber-600 dark:text-amber-400 ml-auto">
+            成品市價：NQ {productMarketPrice.minPriceNQ.toLocaleString()}
+            {productMarketPrice.minPriceHQ > 0 && ` / HQ ${productMarketPrice.minPriceHQ.toLocaleString()}`}
+          </span>
+        )}
+      </div>
+
       {/* 中間製品（可製作的材料） */}
       {craftableMaterials.length > 0 && (
         <div className="space-y-2">
@@ -599,6 +735,9 @@ export function MaterialCostCalculator({
                   </th>
                   <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">
                     購買單價
+                  </th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">
+                    市場參考
                   </th>
                   <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">
                     小計
@@ -735,6 +874,9 @@ export function MaterialCostCalculator({
                           placeholder="市場價"
                         />
                       </td>
+                      <td className="px-3 py-2 text-right">
+                        <MarketPriceRef priceInfo={marketPrices.get(material.itemId)} isHQ={entry?.isHQ} />
+                      </td>
                       <td className="px-3 py-2 text-right font-medium">
                         {isBuying && (() => {
                           const purchaseQty = entry?.purchaseQty || actualQty;
@@ -781,6 +923,9 @@ export function MaterialCostCalculator({
                 </th>
                 <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">
                   單價
+                </th>
+                <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">
+                  市場參考
                 </th>
                 <th className="px-3 py-2 text-right font-medium text-gray-600 dark:text-gray-400">
                   小計
@@ -901,6 +1046,9 @@ export function MaterialCostCalculator({
                         }`}
                         placeholder="市場價"
                       />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <MarketPriceRef priceInfo={marketPrices.get(material.itemId)} />
                     </td>
                     <td className="px-3 py-2 text-right font-medium">
                       {subtotal > 0 ? subtotal.toLocaleString() : '-'}
@@ -1076,6 +1224,45 @@ export function MaterialCostCalculator({
         reserveQty={reserveQty}
         onReserveQtyChange={setReserveQty}
       />
+    </div>
+  );
+}
+
+// 市場價格參考顯示
+function MarketPriceRef({
+  priceInfo,
+  isHQ,
+}: {
+  priceInfo?: MarketPriceInfo;
+  isHQ?: boolean;
+}) {
+  if (!priceInfo) {
+    return <span className="text-xs text-gray-300 dark:text-gray-600">-</span>;
+  }
+
+  const minPrice = isHQ ? priceInfo.minPriceHQ : priceInfo.minPriceNQ;
+  const avgPrice = isHQ ? priceInfo.currentAveragePriceHQ : priceInfo.currentAveragePriceNQ;
+  const listingCount = priceInfo.listings.length;
+  const lastUpdate = priceInfo.lastUploadTime
+    ? new Date(priceInfo.lastUploadTime).toLocaleString()
+    : '未知';
+
+  return (
+    <div className="text-xs space-y-0.5" title={`上次更新：${lastUpdate}\n上架數：${listingCount}`}>
+      {minPrice > 0 ? (
+        <>
+          <div className="text-green-600 dark:text-green-400 font-medium">
+            最低 {minPrice.toLocaleString()}
+          </div>
+          {avgPrice > 0 && avgPrice !== minPrice && (
+            <div className="text-gray-400">
+              均價 {Math.round(avgPrice).toLocaleString()}
+            </div>
+          )}
+        </>
+      ) : (
+        <span className="text-gray-400">無資料</span>
+      )}
     </div>
   );
 }

@@ -1,0 +1,1600 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FF14 市場掃描器</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Exo+2:wght@300;400;500;600&display=swap');
+
+  :root {
+    --gold: #c9a84c;
+    --gold-light: #e8c96a;
+    --gold-dark: #8a6a1e;
+    --bg: #0a0c10;
+    --bg2: #111520;
+    --bg3: #181e2e;
+    --bg4: #1f2840;
+    --text: #d4c5a9;
+    --text-dim: #7a6e5a;
+    --accent: #4a8fcf;
+    --accent2: #2d6ea0;
+    --green: #4aad6a;
+    --red: #c94a4a;
+    --border: #2a3248;
+    --border-gold: #4a3820;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Exo 2', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    background-image:
+      radial-gradient(ellipse at 20% 0%, rgba(74, 143, 207, 0.06) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 100%, rgba(201, 168, 76, 0.05) 0%, transparent 50%);
+  }
+
+  header {
+    padding: 28px 40px 20px;
+    border-bottom: 1px solid var(--border-gold);
+    background: linear-gradient(180deg, rgba(201,168,76,0.08) 0%, transparent 100%);
+    display: flex; align-items: center; gap: 20px;
+  }
+
+  .logo {
+    width: 48px; height: 48px;
+    background: linear-gradient(135deg, var(--gold-dark), var(--gold));
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Cinzel', serif; font-size: 20px; color: var(--bg); font-weight: 700; flex-shrink: 0;
+  }
+
+  h1 {
+    font-family: 'Cinzel', serif; font-size: 22px; color: var(--gold-light);
+    letter-spacing: 0.08em; line-height: 1.2;
+  }
+  h1 small {
+    display: block; font-family: 'Exo 2', sans-serif; font-size: 12px; color: var(--text-dim);
+    letter-spacing: 0.15em; text-transform: uppercase; font-weight: 400; margin-top: 3px;
+  }
+
+  .container { max-width: 1400px; margin: 0 auto; padding: 24px 40px; }
+
+  .config-panel {
+    background: var(--bg2); border: 1px solid var(--border); border-top: 2px solid var(--gold-dark);
+    border-radius: 4px; padding: 24px; margin-bottom: 20px;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; align-items: end;
+  }
+
+  .field { display: flex; flex-direction: column; gap: 6px; }
+
+  label {
+    font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--gold); font-weight: 600;
+  }
+
+  input, select {
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 3px;
+    color: var(--text); padding: 9px 12px; font-family: 'Exo 2', sans-serif; font-size: 14px;
+    width: 100%; transition: border-color 0.2s; outline: none;
+  }
+  input:focus, select:focus { border-color: var(--gold-dark); box-shadow: 0 0 0 2px rgba(201,168,76,0.1); }
+  select option { background: var(--bg3); }
+
+  .btn {
+    background: linear-gradient(135deg, var(--gold-dark), var(--gold)); color: var(--bg);
+    border: none; border-radius: 3px; padding: 10px 24px;
+    font-family: 'Cinzel', serif; font-size: 13px; font-weight: 600; letter-spacing: 0.08em;
+    cursor: pointer; transition: all 0.2s; white-space: nowrap; align-self: end; width: 100%;
+  }
+  .btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
+  .btn:active { transform: translateY(0); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  .btn-secondary { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { border-color: var(--gold-dark); background: var(--bg4); }
+
+  /* Category Chips */
+  .cat-chips-wrap {
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  }
+  .cat-chip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px;
+    font-size: 12px; border-radius: 14px; cursor: pointer; user-select: none;
+    border: 1px solid var(--border); background: var(--bg3); color: var(--text-dim);
+    transition: all 0.15s; position: relative; white-space: nowrap;
+  }
+  .cat-chip:hover { border-color: var(--gold-dark); color: var(--text); }
+  .cat-chip.active { background: var(--bg4); border-color: var(--gold); color: var(--gold); }
+  .cat-chip.partial { background: var(--bg4); border-color: var(--gold-dark); color: var(--gold-dark); border-style: dashed; }
+  .cat-chip .chip-arrow { font-size: 8px; margin-left: 2px; opacity: 0.5; }
+  .cat-chip .chip-count { font-size: 9px; opacity: 0.6; }
+  .cat-dropdown {
+    display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 100;
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 0; min-width: 200px; max-height: 240px; overflow-y: auto;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  }
+  .cat-dropdown.show { display: block; }
+  .cat-dropdown .dd-item {
+    display: flex; align-items: center; gap: 6px; padding: 4px 12px;
+    font-size: 11px; cursor: pointer; color: var(--text);
+  }
+  .cat-dropdown .dd-item:hover { background: rgba(201,168,76,0.08); }
+  .cat-dropdown .dd-item input { accent-color: var(--gold); cursor: pointer; margin: 0; }
+  .cat-dropdown .dd-item label { cursor: pointer; flex: 1; }
+  .cat-dropdown .dd-actions {
+    display: flex; gap: 8px; padding: 4px 12px; border-bottom: 1px solid var(--border);
+    margin-bottom: 2px;
+  }
+  .cat-dropdown .dd-actions span {
+    font-size: 10px; color: var(--accent); cursor: pointer;
+  }
+  .cat-dropdown .dd-actions span:hover { text-decoration: underline; }
+  .cat-quick-btns { display: flex; gap: 4px; }
+  .cat-quick-btn {
+    font-size: 10px; padding: 3px 8px; background: transparent; color: var(--text-dim);
+    border: 1px solid var(--border); border-radius: 10px; cursor: pointer; white-space: nowrap;
+  }
+  .cat-quick-btn:hover { border-color: var(--gold-dark); color: var(--text); }
+  .cat-count { font-size: 10px; color: var(--text-dim); }
+  .item-id-input {
+    width: 100%; padding: 6px 8px; font-size: 12px;
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 3px;
+    color: var(--text); outline: none; font-family: 'Exo 2', sans-serif;
+  }
+  .item-id-input:focus { border-color: var(--gold-dark); }
+
+  .view-tabs {
+    display: flex; gap: 0; margin-bottom: 20px; border-bottom: 2px solid var(--border);
+  }
+  .view-tab {
+    padding: 10px 24px; cursor: pointer; font-size: 13px; font-weight: 600;
+    color: var(--text-dim); border-bottom: 2px solid transparent; margin-bottom: -2px;
+    transition: all 0.15s; letter-spacing: 0.05em; user-select: none;
+  }
+  .view-tab:hover { color: var(--gold); }
+  .view-tab.active { color: var(--gold-light); border-bottom-color: var(--gold); }
+
+  .filter-bar {
+    display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;
+  }
+  .filter-bar input { max-width: 240px; padding: 7px 12px; font-size: 13px; }
+
+  .filter-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .chip {
+    padding: 5px 14px; border-radius: 20px; border: 1px solid var(--border);
+    font-size: 12px; cursor: pointer; transition: all 0.15s;
+    color: var(--text-dim); background: var(--bg2); white-space: nowrap;
+  }
+  .chip:hover { border-color: var(--gold-dark); color: var(--gold); }
+  .chip.active { background: var(--gold-dark); border-color: var(--gold); color: var(--gold-light); }
+
+  .filter-toggle {
+    display: flex; align-items: center; gap: 6px; cursor: pointer;
+    font-size: 12px; color: var(--text-dim); letter-spacing: 0; text-transform: none;
+    padding: 5px 14px; border-radius: 20px; border: 1px solid var(--border);
+    background: var(--bg2); transition: all 0.15s; user-select: none;
+  }
+  .filter-toggle:hover { border-color: var(--gold-dark); color: var(--gold); }
+  .filter-toggle.active { background: rgba(74,173,106,0.15); border-color: rgba(74,173,106,0.4); color: var(--green); }
+  .filter-toggle input { display: none; }
+
+  .filter-params {
+    display: none; gap: 12px; flex-wrap: wrap; align-items: center;
+    padding: 10px 0; margin-bottom: 8px;
+  }
+  .filter-params.show { display: flex; }
+  .filter-params .mini-field { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
+  .filter-params input {
+    width: 80px; padding: 5px 8px; font-size: 12px;
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 3px; color: var(--text);
+  }
+
+  .progress-bar-wrap {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 3px;
+    overflow: hidden; height: 6px; margin-bottom: 8px;
+  }
+  .progress-bar {
+    height: 100%; background: linear-gradient(90deg, var(--gold-dark), var(--gold-light));
+    transition: width 0.3s ease; box-shadow: 0 0 12px rgba(201,168,76,0.5);
+  }
+  #statusMsg { font-size: 12px; color: var(--text-dim); margin-bottom: 16px; min-height: 18px; letter-spacing: 0.05em; }
+
+  .stats-row { display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+  .stat-card {
+    background: var(--bg2); border: 1px solid var(--border); border-left: 3px solid var(--gold-dark);
+    border-radius: 3px; padding: 12px 18px; min-width: 140px;
+  }
+  .stat-card .val { font-family: 'Cinzel', serif; font-size: 22px; color: var(--gold-light); font-weight: 600; }
+  .stat-card .lbl { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.1em; margin-top: 2px; }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 4px; background: var(--bg2); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead { background: var(--bg3); border-bottom: 2px solid var(--gold-dark); }
+  th {
+    padding: 12px 14px; text-align: left; font-family: 'Cinzel', serif; font-size: 11px;
+    color: var(--gold); letter-spacing: 0.1em; white-space: nowrap;
+    cursor: pointer; user-select: none; transition: color 0.15s;
+  }
+  th:hover { color: var(--gold-light); }
+  th .sort-icon { opacity: 0.4; margin-left: 4px; }
+  th.sorted .sort-icon { opacity: 1; color: var(--gold-light); }
+
+  tbody tr { border-bottom: 1px solid var(--border); transition: background 0.12s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--bg3); }
+  td { padding: 10px 14px; vertical-align: middle; }
+
+  .item-name { font-weight: 500; color: #e8dfc8; }
+  .item-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  .price { font-family: 'Cinzel', serif; color: var(--gold-light); font-weight: 600; }
+  .velocity { color: var(--accent); }
+  .sellers { color: var(--text); }
+  .sellers.low { color: var(--green); font-weight: 600; }
+  .sellers.mid { color: var(--gold); }
+  .sellers.high { color: var(--red); }
+
+  .score-bar-wrap { display: flex; align-items: center; gap: 8px; }
+  .score-bar {
+    height: 6px; background: linear-gradient(90deg, var(--accent2), var(--green));
+    border-radius: 3px; min-width: 4px; transition: width 0.3s;
+  }
+  .score-val { font-family: 'Cinzel', serif; font-size: 13px; color: var(--green); font-weight: 600; min-width: 40px; }
+
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; margin-left: 6px;
+  }
+  .badge-hot { background: rgba(201,168,76,0.2); color: var(--gold-light); border: 1px solid var(--gold-dark); }
+  .badge-safe { background: rgba(74,173,106,0.15); color: var(--green); border: 1px solid rgba(74,173,106,0.4); }
+  .badge-profit { background: rgba(74,143,207,0.15); color: var(--accent); border: 1px solid rgba(74,143,207,0.4); }
+
+  .empty { text-align: center; padding: 60px 20px; color: var(--text-dim); }
+  .empty .icon { font-size: 40px; margin-bottom: 12px; opacity: 0.5; }
+
+  .error-msg {
+    background: rgba(201,74,74,0.1); border: 1px solid rgba(201,74,74,0.3); color: #e08888;
+    padding: 12px 16px; border-radius: 4px; font-size: 13px; margin-bottom: 16px; display: none;
+  }
+
+  .tip {
+    background: rgba(74,143,207,0.08); border: 1px solid rgba(74,143,207,0.2);
+    border-left: 3px solid var(--accent); color: #a0bcd8;
+    padding: 10px 14px; border-radius: 3px; font-size: 12px; margin-bottom: 16px; line-height: 1.6;
+  }
+
+  .hidden { display: none !important; }
+
+  .loading-spinner {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid var(--text-dim); border-top-color: var(--gold);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    vertical-align: middle; margin-left: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @media (max-width: 768px) {
+    .container { padding: 16px; }
+    header { padding: 20px 16px; }
+    .config-panel { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">⚔</div>
+  <div>
+    <h1>FF14 市場掃描器
+      <small>Market Profitability Scanner · Powered by Universalis</small>
+    </h1>
+    <div style="margin-top:6px;font-size:13px">
+      <a href="/ff14/reports/index.html" style="color:var(--accent);text-decoration:underline">📄 最近報告</a>
+    </div>
+  </div>
+</header>
+
+<div class="container">
+
+  <div class="tip">
+    💡 選擇資料中心後，會自動載入該中心所有伺服器。查詢以選擇的伺服器為主，多伺服器查詢限制在同一資料中心內。<br>
+    <b>綜合分數 = 日銷售量 × 均價 ÷ (賣家數 + 1)</b>，數字越高越值得投入。掃描約需 1～3 分鐘。<br>
+    掃描分類可多選，支援分類掃描或直接輸入物品 ID。資料來源：Cafemaker（中文物品名）+ Universalis（市場價格）。
+  </div>
+
+  <div class="config-panel">
+    <div class="field">
+      <label>資料中心</label>
+      <select id="dcSelect" onchange="onDcChange()">
+        <option value="">載入中...</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>伺服器</label>
+      <select id="worldSelect">
+        <option value="">請先選擇資料中心</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>最高物品等級</label>
+      <input type="number" id="maxIlvl" value="999" min="1" max="999" />
+    </div>
+    <div class="field" style="grid-column: 1 / -1;">
+      <label>掃描分類 <span class="cat-count" id="catCount"></span></label>
+      <div class="cat-chips-wrap" id="categoryPanel">載入分類中...</div>
+    </div>
+    <div class="field">
+      <label>物品 ID（可選）</label>
+      <input type="text" class="item-id-input" id="itemIdInput" placeholder="例：5111,5112" oninput="saveSettings()">
+    </div>
+    <div class="field">
+      <label>查詢範圍</label>
+      <select id="regionScope">
+        <option value="world" selected>本伺服器</option>
+        <option value="dc">整個資料中心</option>
+      </select>
+    </div>
+    <div class="field">
+      <button class="btn" id="scanBtn" onclick="startScan()">⚔ 開始掃描</button>
+    </div>
+    <div class="field">
+      <button class="btn btn-secondary" onclick="clearResults()">✕ 清除結果</button>
+    </div>
+  </div>
+
+  <div id="errorMsg" class="error-msg"></div>
+
+  <div id="progressSection" class="hidden">
+    <div class="progress-bar-wrap">
+      <div class="progress-bar" id="progressBar" style="width:0%"></div>
+    </div>
+    <div id="statusMsg">初始化中...</div>
+  </div>
+
+  <div id="statsRow" class="stats-row hidden">
+    <div class="stat-card"><div class="val" id="statTotal">0</div><div class="lbl">掃描物品數</div></div>
+    <div class="stat-card"><div class="val" id="statResults">0</div><div class="lbl">顯示筆數</div></div>
+    <div class="stat-card"><div class="val" id="statTopScore">-</div><div class="lbl">最佳投資品</div></div>
+    <div class="stat-card"><div class="val" id="statTopVelocity">-</div><div class="lbl">最熱賣品</div></div>
+    <div class="stat-card"><div class="val" id="statServer">-</div><div class="lbl">查詢對象</div></div>
+  </div>
+
+  <div id="filterBarSection" class="hidden">
+    <div class="view-tabs">
+      <div class="view-tab active" data-view="profitable" onclick="switchView('profitable', this)">💰 最值得販賣</div>
+      <div class="view-tab" data-view="bestselling" onclick="switchView('bestselling', this)">🔥 最熱賣產品</div>
+      <div class="view-tab" data-view="all" onclick="switchView('all', this)">📋 全部物品</div>
+    </div>
+    <div class="filter-bar">
+      <input type="text" id="searchFilter" placeholder="搜尋物品名稱（中/英文）..." oninput="applyFilter()" />
+      <div class="filter-chips">
+        <span class="chip active" data-sort="score" onclick="setSort('score', this)">📊 分數</span>
+        <span class="chip" data-sort="avgPrice" onclick="setSort('avgPrice', this)">💰 價格</span>
+        <span class="chip" data-sort="velocity" onclick="setSort('velocity', this)">🔥 銷量</span>
+        <span class="chip" data-sort="sellersCount" onclick="setSort('sellersCount', this)">👥 賣家數</span>
+      </div>
+      <label class="filter-toggle" id="filterToggle" onclick="toggleFilter()">
+        <input type="checkbox" id="enableFilter" />
+        🔧 進階篩選
+      </label>
+    </div>
+    <div class="filter-params" id="filterParams">
+      <div class="mini-field">最低均價 <input type="number" id="fMinPrice" value="500" min="0" step="100" onchange="applyFilter()" /></div>
+      <div class="mini-field">最低日銷量 <input type="number" id="fMinVelocity" value="3" min="0" step="0.5" onchange="applyFilter()" /></div>
+      <div class="mini-field">最多賣家數 <input type="number" id="fMaxSellers" value="20" min="1" onchange="applyFilter()" /></div>
+    </div>
+  </div>
+
+  <div id="tableSection">
+    <div class="empty"><div class="icon">🔮</div><div>選擇資料中心與伺服器，然後點擊「開始掃描」</div></div>
+  </div>
+
+</div>
+
+<script>
+// ─── Config ──────────────────────────────────────────────────────────────────
+const UNI_BASE = 'https://universalis.app/api/v2';
+const CAFE_BASE = 'https://cafemaker.wakingsands.com';
+
+// ─── State ───────────────────────────────────────────────────────────────────
+let allResults = [];
+let sortKey = 'score';
+let sortAsc = false;
+let currentView = 'profitable'; // 'profitable' | 'bestselling' | 'all'
+
+// ─── DC / World Data ────────────────────────────────────────────────────────
+let dataCenters = [];   // array of { name, region, worlds: [id,...] }
+let worldsMap = {};     // id -> name
+let worldNameToId = {}; // name -> id
+let currentDcName = '';
+let currentWorldName = '';
+
+// ─── Category System ─────────────────────────────────────────────────────────
+const CATEGORY_GROUPS = [
+  { label: '藥品食品', labelTc: '藥品食品', ids: [44, 45, 46, 47], defaultOn: true },
+  { label: '素材', labelTc: '素材', ids: [48, 49, 50, 51, 52, 53, 54, 55, 56, 59, 60, 83], defaultOn: true },
+  { label: '武器', labelTc: '武器', ids: [1,2,3,4,5,6,7,8,9,10,11,84,87,88,89,96,97,98,105,106,107,108,109,110,111] },
+  { label: '防具', labelTc: '防具', ids: [34,35,36,37,38] },
+  { label: '飾品', labelTc: '飾品', ids: [40,41,42,43] },
+  { label: '製作工具', labelTc: '製作工具', ids: [12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27] },
+  { label: '採集工具', labelTc: '採集工具', ids: [28,29,30,31,32,33,99] },
+  { label: '家具', labelTc: '家具', ids: [57,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80] },
+  { label: '魔晶石', labelTc: '魔晶石', ids: [58] },
+  { label: '其他', labelTc: '其他', ids: [61,63,81,82,85,86,94,95,100,112,90,91,92,93,101,102,103,104] },
+];
+
+let allCategoryMeta = {}; // Map: id -> { id, nameCn, nameEn }
+
+async function loadCategories() {
+  try {
+    const url = `${CAFE_BASE}/ItemUICategory?limit=200&columns=ID,Name,Name_chs,Name_en`;
+    const data = await fetchJSON(url);
+    const results = data.Results || [];
+    for (const r of results) {
+      if (r.ID && r.ID > 0 && (r.Name_chs || r.Name_en || r.Name)) {
+        const nameCn = r.Name_chs || r.Name || '';
+        const nameEn = r.Name_en || '';
+        // Skip empty names and unobtainable
+        if (!nameCn && !nameEn) continue;
+        allCategoryMeta[r.ID] = { id: r.ID, nameCn, nameEn, nameTc: toTraditionalSync(nameCn) };
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load categories from API, using defaults', e);
+    // Fallback basic names
+    const fallback = {
+      44:'藥品',45:'食材',46:'食品',47:'水產品',48:'石材',49:'金屬',50:'木材',
+      51:'布料',52:'皮革',53:'骨材',54:'煉金原料',55:'染料',56:'部件',57:'家具',
+      58:'魔晶石',59:'水晶',60:'觸媒',61:'雜貨'
+    };
+    for (const [id, name] of Object.entries(fallback)) {
+      allCategoryMeta[parseInt(id)] = { id: parseInt(id), nameCn: name, nameEn: '', nameTc: name };
+    }
+  }
+  buildCategoryUI();
+}
+
+function buildCategoryUI() {
+  const panel = document.getElementById('categoryPanel');
+  if (!panel) return;
+
+  const assignedIds = new Set();
+  for (const g of CATEGORY_GROUPS) g.ids.forEach(id => assignedIds.add(id));
+  const unassigned = Object.keys(allCategoryMeta).map(Number).filter(id => !assignedIds.has(id) && id !== 39 && id !== 62);
+  const extraGroup = unassigned.length > 0 ? [{ label: '未分類', labelTc: '未分類', ids: unassigned }] : [];
+  const groups = [...CATEGORY_GROUPS, ...extraGroup];
+
+  let html = '';
+  for (let gi = 0; gi < groups.length; gi++) {
+    const g = groups[gi];
+    const validIds = g.ids.filter(id => allCategoryMeta[id]);
+    if (validIds.length === 0) continue;
+    const isDefault = g.defaultOn;
+
+    // Build dropdown items
+    let ddItems = '';
+    for (const id of validIds) {
+      const meta = allCategoryMeta[id];
+      const displayName = meta.nameTc || meta.nameCn;
+      const checked = isDefault ? 'checked' : '';
+      ddItems += `<div class="dd-item"><input type="checkbox" id="cat_${id}" value="${id}" data-group="${gi}" ${checked} onchange="onCatChange()"><label for="cat_${id}">${escHtml(displayName)}</label></div>`;
+    }
+
+    html += `<div class="cat-chip ${isDefault ? 'active' : ''}" data-group="${gi}" onclick="toggleGroupChip(${gi}, event)">
+      ${g.labelTc || g.label} <span class="chip-count">${validIds.length}</span><span class="chip-arrow">▾</span>
+      <div class="cat-dropdown" id="catDd${gi}" onclick="event.stopPropagation()">
+        <div class="dd-actions">
+          <span onclick="selectGroup(${gi},true)">全選</span>
+          <span onclick="selectGroup(${gi},false)">全不選</span>
+        </div>
+        ${ddItems}
+      </div>
+    </div>`;
+  }
+  panel.innerHTML = html;
+  updateCatCount();
+
+  // Close dropdowns on outside click
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.cat-chip')) {
+      document.querySelectorAll('.cat-dropdown.show').forEach(d => d.classList.remove('show'));
+    }
+  });
+}
+
+function toggleGroupChip(gi, e) {
+  // If clicking the arrow or chip itself (not dropdown), toggle dropdown
+  const dd = document.getElementById(`catDd${gi}`);
+  if (!dd) return;
+
+  // Close other dropdowns
+  document.querySelectorAll('.cat-dropdown.show').forEach(d => {
+    if (d !== dd) d.classList.remove('show');
+  });
+  dd.classList.toggle('show');
+}
+
+function selectGroup(gi, checked) {
+  document.querySelectorAll(`#categoryPanel input[data-group="${gi}"]`).forEach(cb => cb.checked = checked);
+  onCatChange();
+}
+
+function toggleAllCats(checked) {
+  document.querySelectorAll('#categoryPanel input[type="checkbox"]').forEach(cb => cb.checked = checked);
+  onCatChange();
+}
+
+function onCatChange() {
+  updateCatCount();
+  updateChipStates();
+  saveSettings();
+}
+
+function updateChipStates() {
+  document.querySelectorAll('#categoryPanel .cat-chip').forEach(chip => {
+    const gi = chip.dataset.group;
+    const cbs = chip.querySelectorAll('input[type="checkbox"]');
+    const total = cbs.length;
+    const checked = [...cbs].filter(cb => cb.checked).length;
+    chip.classList.remove('active', 'partial');
+    if (checked === total && total > 0) chip.classList.add('active');
+    else if (checked > 0) chip.classList.add('partial');
+  });
+}
+
+function updateCatCount() {
+  const checked = document.querySelectorAll('#categoryPanel input[type="checkbox"]:checked');
+  const el = document.getElementById('catCount');
+  if (el) el.textContent = `(${checked.length})`;
+}
+
+function getSelectedCategoryIds() {
+  const checkboxes = document.querySelectorAll('#categoryPanel input[type="checkbox"]:checked');
+  return [...checkboxes].map(cb => parseInt(cb.value));
+}
+
+function getDirectItemIds() {
+  const input = document.getElementById('itemIdInput')?.value || '';
+  return input.split(/[,，\s]+/).map(s => parseInt(s.trim())).filter(n => n > 0 && !isNaN(n));
+}
+
+// ─── LocalStorage 設定持久化 ────────────────────────────────────────────────
+const LS_KEY = 'ff14_scanner_settings';
+
+function saveSettings() {
+  try {
+    const selectedCats = getSelectedCategoryIds().map(String);
+    const settings = {
+      dc: document.getElementById('dcSelect').value,
+      world: document.getElementById('worldSelect').value,
+      maxIlvl: document.getElementById('maxIlvl').value,
+      categories: selectedCats,
+      regionScope: document.getElementById('regionScope').value,
+      itemIds: document.getElementById('itemIdInput')?.value || ''
+    };
+    localStorage.setItem(LS_KEY, JSON.stringify(settings));
+  } catch (e) { console.warn('saveSettings failed', e); }
+}
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) { return null; }
+}
+
+function applySettingsToUI(settings) {
+  if (!settings) return;
+  if (settings.maxIlvl) document.getElementById('maxIlvl').value = settings.maxIlvl;
+  if (settings.regionScope) document.getElementById('regionScope').value = settings.regionScope;
+  if (settings.itemIds) {
+    const el = document.getElementById('itemIdInput');
+    if (el) el.value = settings.itemIds;
+  }
+  // Categories will be restored after buildCategoryUI
+}
+
+function restoreCategorySelection(settings) {
+  if (!settings || !settings.categories || settings.categories.length === 0) return;
+  const savedSet = new Set(settings.categories.map(String));
+  // First uncheck all, then check saved ones
+  document.querySelectorAll('#categoryPanel input[type="checkbox"]').forEach(cb => {
+    cb.checked = savedSet.has(cb.value);
+  });
+  updateCatCount();
+  updateChipStates();
+}
+
+// Attach save listeners to all config controls
+function attachSaveListeners() {
+  ['dcSelect', 'worldSelect', 'maxIlvl', 'regionScope'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', saveSettings);
+  });
+}
+
+// ─── Init: Load DC & World lists on page load ───────────────────────────────
+async function initDcWorlds() {
+  const savedSettings = loadSettings();
+  // Apply non-DC settings immediately
+  applySettingsToUI(savedSettings);
+
+  try {
+    const [dcs, worlds] = await Promise.all([
+      fetchJSON(`${UNI_BASE}/data-centers`),
+      fetchJSON(`${UNI_BASE}/worlds`)
+    ]);
+
+    // Build world maps
+    for (const w of worlds) {
+      worldsMap[w.id] = w.name;
+      worldNameToId[w.name] = w.id;
+    }
+
+    dataCenters = dcs;
+
+    // Group by region for better display
+    const regionOrder = ['繁中服', 'Japan', 'North-America', 'Europe', 'Oceania', '中国', '한국'];
+    const regionLabel = {
+      '繁中服': '繁體中文服',
+      'Japan': '日本 (Japan)',
+      'North-America': '北美 (North America)',
+      'Europe': '歐洲 (Europe)',
+      'Oceania': '大洋洲 (Oceania)',
+      '中国': '中國 (China)',
+      '한국': '韓國 (Korea)',
+    };
+
+    const dcSelect = document.getElementById('dcSelect');
+    dcSelect.innerHTML = '<option value="">── 請選擇資料中心 ──</option>';
+
+    // Sort DCs by region order
+    const sortedDcs = [...dcs].sort((a, b) => {
+      const ai = regionOrder.indexOf(a.region);
+      const bi = regionOrder.indexOf(b.region);
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+
+    let lastRegion = '';
+    for (const dc of sortedDcs) {
+      if (dc.region !== lastRegion) {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = regionLabel[dc.region] || dc.region;
+        // Add all DCs of this region into this optgroup
+        const regionDcs = sortedDcs.filter(d => d.region === dc.region);
+        for (const rdc of regionDcs) {
+          const worldNames = (rdc.worlds || []).map(id => worldsMap[id] || id).join(', ');
+          const opt = document.createElement('option');
+          opt.value = rdc.name;
+          opt.textContent = `${rdc.name}`;
+          opt.title = worldNames;
+          optgroup.appendChild(opt);
+        }
+        dcSelect.appendChild(optgroup);
+        lastRegion = dc.region;
+        // skip other DCs of same region (already added in optgroup)
+        // but we need to advance - use a set to track
+      }
+    }
+
+    // Remove duplicate optgroups: rebuild cleanly
+    dcSelect.innerHTML = '<option value="">── 請選擇資料中心 ──</option>';
+    const addedRegions = new Set();
+    for (const dc of sortedDcs) {
+      if (!addedRegions.has(dc.region)) {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = regionLabel[dc.region] || dc.region;
+        const regionDcs = sortedDcs.filter(d => d.region === dc.region);
+        for (const rdc of regionDcs) {
+          const opt = document.createElement('option');
+          opt.value = rdc.name;
+          opt.textContent = rdc.name;
+          optgroup.appendChild(opt);
+        }
+        dcSelect.appendChild(optgroup);
+        addedRegions.add(dc.region);
+      }
+    }
+
+    // Restore saved DC or default to 陸行鳥 (繁中服)
+    if (savedSettings && savedSettings.dc) {
+      dcSelect.value = savedSettings.dc;
+    } else {
+      const twDc = dcs.find(d => d.region === '繁中服');
+      if (twDc) dcSelect.value = twDc.name;
+    }
+    onDcChange();
+
+    // Restore saved world
+    if (savedSettings && savedSettings.world) {
+      const worldSelect = document.getElementById('worldSelect');
+      // Check if saved world exists in the options
+      const hasWorld = [...worldSelect.options].some(o => o.value === savedSettings.world);
+      if (hasWorld) worldSelect.value = savedSettings.world;
+    }
+
+    // Load categories from API
+    await loadCategories();
+    // Restore saved category selection
+    restoreCategorySelection(savedSettings);
+
+    // Attach save listeners after everything is loaded
+    attachSaveListeners();
+
+  } catch (e) {
+    console.error('Failed to load DC/World data:', e);
+    showError('無法載入資料中心列表，請重新整理頁面。');
+  }
+}
+
+function onDcChange() {
+  const dcSelect = document.getElementById('dcSelect');
+  const worldSelect = document.getElementById('worldSelect');
+  const dcName = dcSelect.value;
+  currentDcName = dcName;
+
+  worldSelect.innerHTML = '';
+
+  if (!dcName) {
+    worldSelect.innerHTML = '<option value="">請先選擇資料中心</option>';
+    return;
+  }
+
+  const dc = dataCenters.find(d => d.name === dcName);
+  if (!dc) {
+    worldSelect.innerHTML = '<option value="">找不到此資料中心</option>';
+    return;
+  }
+
+  // Populate servers for this DC
+  const worldIds = dc.worlds || [];
+  const worldNames = worldIds.map(id => ({ id, name: worldsMap[id] || `World#${id}` })).sort((a, b) => a.name.localeCompare(b.name));
+
+  for (const w of worldNames) {
+    const opt = document.createElement('option');
+    opt.value = w.name;
+    opt.textContent = `${w.name} (ID: ${w.id})`;
+    worldSelect.appendChild(opt);
+  }
+
+  currentWorldName = worldNames.length > 0 ? worldNames[0].name : '';
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}: ${url.substring(0, 80)}`);
+  return r.json();
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function setProgress(pct, msg) {
+  document.getElementById('progressBar').style.width = pct + '%';
+  document.getElementById('statusMsg').textContent = msg;
+}
+function showError(msg) { const el = document.getElementById('errorMsg'); el.style.display = 'block'; el.textContent = '❌ ' + msg; }
+function clearError() { document.getElementById('errorMsg').style.display = 'none'; }
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmtGil(n) {
+  if (!n || n === 0) return '—';
+  if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+  if (n >= 10000) return Math.round(n/1000).toLocaleString() + 'K';
+  return n.toLocaleString();
+}
+function fmtCompact(n) {
+  if (n >= 1000000) return (n/1000000).toFixed(1)+'M';
+  if (n >= 1000) return (n/1000).toFixed(1)+'K';
+  return n.toString();
+}
+function median(arr) {
+  if (!arr || arr.length === 0) return 0;
+  const s = arr.slice().sort((a,b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 === 1 ? s[mid] : Math.round((s[mid-1] + s[mid]) / 2);
+}
+function timeAgo(ts) {
+  if (!ts) return '';
+  let tms = Number(ts);
+  if (tms > 0 && tms < 1e11) tms *= 1000; // seconds -> ms
+  const mins = Math.round((Date.now() - tms) / 60000);
+  if (mins < 0) return '';
+  if (mins < 60) return `${mins} 分鐘前`;
+  if (mins < 1440) return `${Math.round(mins/60)} 小時前`;
+  return `${Math.round(mins/1440)} 天前`;
+}
+
+// ─── OpenCC 簡體→繁體轉換 ─────────────────────────────────────────────────────
+async function maybeLoadOpenCC() {
+  if (window.__opencc_loaded__) return;
+  try {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/opencc-js@1.0.5/dist/umd/full.js';
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('OpenCC load failed'));
+      document.head.appendChild(s);
+    });
+    // opencc-js UMD: OpenCC.Converter({ from, to }) returns a converter function
+    try {
+      if (window.OpenCC && window.OpenCC.Converter) {
+        window.__opencc_conv__ = OpenCC.Converter({ from: 'cn', to: 'twp' });
+        console.log('OpenCC converter initialized (cn→twp)');
+      }
+    } catch (e) {
+      try {
+        window.__opencc_conv__ = OpenCC.Converter({ from: 'cn', to: 'tw' });
+        console.log('OpenCC converter initialized (cn→tw)');
+      } catch (e2) { console.warn('OpenCC converter init failed', e2); }
+    }
+    window.__opencc_loaded__ = true;
+  } catch (e) {
+    console.warn('OpenCC load failed, using fallback s2t map', e);
+    window.__opencc_loaded__ = true;
+  }
+}
+
+function toTraditionalSync(text) {
+  if (!text) return text;
+  if (typeof window.__opencc_conv__ === 'function') {
+    try { return window.__opencc_conv__(text); } catch (e) {}
+  }
+  // Fallback: common simplified→traditional mapping for FF14 item names
+  return fallbackS2T(text);
+}
+
+function fallbackS2T(text) {
+  // High-frequency simplified→traditional pairs found in FF14 item names
+  const map = {
+    '与':'與','万':'萬','丝':'絲','两':'兩','严':'嚴','丰':'豐','临':'臨',
+    '为':'為','举':'舉','义':'義','乐':'樂','习':'習','书':'書','买':'買',
+    '乱':'亂','争':'爭','亏':'虧','云':'雲','亚':'亞','产':'產','亩':'畝',
+    '亲':'親','仅':'僅','从':'從','仓':'倉','仪':'儀','们':'們','价':'價',
+    '众':'眾','优':'優','伙':'夥','会':'會','伞':'傘','伟':'偉','传':'傳',
+    '伤':'傷','伦':'倫','伪':'偽','体':'體','余':'餘','佣':'傭','侠':'俠',
+    '侣':'侶','侦':'偵','侧':'側','侨':'僑','俩':'倆','债':'債','倾':'傾',
+    '偿':'償','养':'養','兰':'蘭','关':'關','兴':'興','兽':'獸','军':'軍',
+    '农':'農','冲':'沖','决':'決','况':'況','冻':'凍','净':'淨','凤':'鳳',
+    '凭':'憑','击':'擊','凯':'凱','几':'幾','凶':'兇','刘':'劉','则':'則',
+    '创':'創','划':'劃','别':'別','刮':'颳','制':'製','刹':'剎','剂':'劑',
+    '剑':'劍','剧':'劇','劝':'勸','办':'辦','务':'務','动':'動','劳':'勞',
+    '势':'勢','勋':'勳','匀':'勻','医':'醫','华':'華','单':'單','卖':'賣',
+    '卫':'衛','厂':'廠','厅':'廳','历':'歷','厉':'厲','压':'壓','厌':'厭',
+    '县':'縣','叁':'參','参':'參','双':'雙','发':'發','变':'變','叙':'敘',
+    '叶':'葉','号':'號','叹':'嘆','吃':'吃','合':'合','吕':'呂','听':'聽',
+    '启':'啟','吨':'噸','呐':'吶','员':'員','呜':'嗚','周':'週','咸':'鹹',
+    '响':'響','哑':'啞','唤':'喚','啬':'嗇','嘱':'囑','园':'園','围':'圍',
+    '国':'國','图':'圖','圆':'圓','圣':'聖','场':'場','坏':'壞','块':'塊',
+    '坚':'堅','垒':'壘','垦':'墾','城':'城','埚':'堝','堕':'墮','塔':'塔',
+    '墙':'牆','壮':'壯','声':'聲','处':'處','备':'備','复':'復','夹':'夾',
+    '够':'夠','头':'頭','夺':'奪','奋':'奮','奖':'獎','奥':'奧','妇':'婦',
+    '妈':'媽','妆':'妝','姐':'姐','娘':'娘','婴':'嬰','嫔':'嬪','孙':'孫',
+    '学':'學','宁':'寧','宝':'寶','实':'實','宠':'寵','审':'審','宪':'憲',
+    '宫':'宮','对':'對','寻':'尋','导':'導','将':'將','尔':'爾','尘':'塵',
+    '尝':'嘗','尽':'盡','层':'層','岁':'歲','岛':'島','岭':'嶺','岩':'岩',
+    '岳':'嶽','峡':'峽','崭':'嶄','巩':'鞏','币':'幣','师':'師','带':'帶',
+    '帅':'帥','帐':'帳','帜':'幟','帧':'幀','帮':'幫','干':'乾','广':'廣',
+    '庄':'莊','庆':'慶','库':'庫','应':'應','庙':'廟','废':'廢','开':'開',
+    '异':'異','弃':'棄','弥':'彌','张':'張','弯':'彎','弹':'彈','强':'強',
+    '归':'歸','当':'當','录':'錄','彻':'徹','径':'徑','征':'徵','御':'御',
+    '忆':'憶','忧':'憂','怀':'懷','态':'態','怜':'憐','总':'總','恋':'戀',
+    '恶':'惡','悦':'悅','惊':'驚','惧':'懼','惨':'慘','惯':'慣','愿':'願',
+    '慑':'懾','懒':'懶','戏':'戲','战':'戰','户':'戶','执':'執','扑':'撲',
+    '扩':'擴','扫':'掃','扬':'揚','扰':'擾','抚':'撫','抛':'拋','抢':'搶',
+    '护':'護','报':'報','担':'擔','拟':'擬','拥':'擁','择':'擇','挂':'掛',
+    '挑':'挑','挡':'擋','挣':'掙','挤':'擠','挥':'揮','损':'損','换':'換',
+    '据':'據','掷':'擲','摄':'攝','摆':'擺','摇':'搖','摧':'摧','撑':'撐',
+    '操':'操','擅':'擅','敌':'敵','断':'斷','无':'無','旧':'舊','时':'時',
+    '旷':'曠','昆':'崑','显':'顯','晓':'曉','晕':'暈','暂':'暫','术':'術',
+    '机':'機','杀':'殺','杂':'雜','权':'權','条':'條','来':'來','杨':'楊',
+    '极':'極','构':'構','枪':'槍','柜':'櫃','标':'標','栈':'棧','样':'樣',
+    '档':'檔','桥':'橋','梦':'夢','检':'檢','棱':'稜','楼':'樓','榄':'欖',
+    '模':'模','橡':'橡','欢':'歡','歼':'殲','残':'殘','毁':'毀','毕':'畢',
+    '气':'氣','氢':'氫','汇':'匯','汉':'漢','污':'污','沟':'溝','没':'沒',
+    '沧':'滄','沪':'滬','油':'油','泪':'淚','泽':'澤','洁':'潔','浅':'淺',
+    '浆':'漿','浇':'澆','浊':'濁','测':'測','浓':'濃','浮':'浮','海':'海',
+    '涂':'塗','涌':'湧','涛':'濤','润':'潤','涩':'澀','淀':'澱','深':'深',
+    '混':'混','渊':'淵','渐':'漸','渔':'漁','温':'溫','游':'遊','湾':'灣',
+    '溃':'潰','滚':'滾','满':'滿','滤':'濾','滥':'濫','潜':'潛','澜':'瀾',
+    '灵':'靈','灾':'災','灿':'燦','炉':'爐','炼':'煉','烁':'爍','烛':'燭',
+    '烟':'煙','烦':'煩','烧':'燒','热':'熱','焕':'煥','焰':'焰','煮':'煮',
+    '熏':'燻','爷':'爺','片':'片','牍':'牘','牵':'牽','犊':'犢','状':'狀',
+    '犹':'猶','狮':'獅','狱':'獄','猎':'獵','猪':'豬','猫':'貓','献':'獻',
+    '玛':'瑪','环':'環','现':'現','珐':'琺','珑':'瓏','琐':'瑣','瑶':'瑤',
+    '璃':'璃','璧':'璧','甲':'甲','电':'電','画':'畫','畅':'暢','异':'異',
+    '疗':'療','疯':'瘋','疮':'瘡','症':'症','痒':'癢','痕':'痕','瘫':'癱',
+    '皱':'皺','盐':'鹽','监':'監','盖':'蓋','盘':'盤','盛':'盛','眉':'眉',
+    '着':'著','睁':'睜','瞒':'瞞','矿':'礦','码':'碼','碍':'礙','碛':'磧',
+    '磷':'磷','礼':'禮','祸':'禍','禅':'禪','离':'離','种':'種','称':'稱',
+    '积':'積','稳':'穩','穷':'窮','窃':'竊','窑':'窯','窜':'竄','窝':'窩',
+    '竞':'競','笔':'筆','笼':'籠','筑':'築','签':'簽','简':'簡','箭':'箭',
+    '篮':'籃','类':'類','粗':'粗','粮':'糧','粹':'粹','纠':'糾','红':'紅',
+    '纤':'纖','约':'約','级':'級','纪':'紀','纫':'紉','纬':'緯','纯':'純',
+    '纱':'紗','纲':'綱','纳':'納','纵':'縱','纷':'紛','纸':'紙','纹':'紋',
+    '纺':'紡','纽':'紐','线':'線','练':'練','组':'組','细':'細','织':'織',
+    '终':'終','绍':'紹','经':'經','绑':'綁','结':'結','绒':'絨','绕':'繞',
+    '绘':'繪','给':'給','络':'絡','绝':'絕','绞':'絞','统':'統','继':'繼',
+    '绩':'績','绪':'緒','续':'續','维':'維','绵':'綿','综':'綜','绽':'綻',
+    '绿':'綠','缀':'綴','缅':'緬','缆':'纜','缇':'緹','编':'編','缎':'緞',
+    '缓':'緩','缔':'締','缕':'縷','缘':'緣','缚':'縛','缝':'縫','缠':'纏',
+    '缤':'繽','缥':'縹','缨':'纓','缩':'縮','缪':'繆','缫':'繅','缭':'繚',
+    '缰':'韁','缴':'繳','罗':'羅','罚':'罰','罢':'罷','网':'網','羡':'羨',
+    '翘':'翹','翼':'翼','耸':'聳','聂':'聶','联':'聯','聪':'聰','职':'職',
+    '肃':'肅','肤':'膚','肠':'腸','肾':'腎','肿':'腫','胀':'脹','胁':'脅',
+    '脉':'脈','脏':'髒','脑':'腦','脸':'臉','腊':'臘','腻':'膩','腾':'騰',
+    '膜':'膜','臭':'臭','舆':'輿','舰':'艦','艰':'艱','艳':'艷','节':'節',
+    '芦':'蘆','芯':'芯','花':'花','苍':'蒼','苏':'蘇','苗':'苗','英':'英',
+    '茧':'繭','药':'藥','荡':'蕩','荣':'榮','荤':'葷','荧':'熒','莲':'蓮',
+    '获':'獲','营':'營','萝':'蘿','萧':'蕭','蓝':'藍','蔑':'蔑','蔷':'薔',
+    '蔽':'蔽','蕴':'蘊','薛':'薛','藏':'藏','虏':'虜','虑':'慮','虚':'虛',
+    '虫':'蟲','蚀':'蝕','蛇':'蛇','蛋':'蛋','蛮':'蠻','蜡':'蠟','蝇':'蠅',
+    '蝎':'蠍','蝴':'蝴','螺':'螺','蟹':'蟹','衅':'釁','术':'術','补':'補',
+    '装':'裝','裤':'褲','览':'覽','觉':'覺','观':'觀','规':'規','视':'視',
+    '觞':'觴','角':'角','触':'觸','记':'記','讨':'討','让':'讓','讲':'講',
+    '论':'論','设':'設','访':'訪','证':'證','评':'評','识':'識','诈':'詐',
+    '词':'詞','译':'譯','试':'試','诗':'詩','话':'話','该':'該','详':'詳',
+    '语':'語','误':'誤','说':'說','请':'請','诸':'諸','诺':'諾','读':'讀',
+    '调':'調','谁':'誰','谈':'談','谊':'誼','谋':'謀','谐':'諧','谓':'謂',
+    '谜':'謎','谢':'謝','谣':'謠','谨':'謹','谱':'譜','豆':'豆','负':'負',
+    '贝':'貝','财':'財','贡':'貢','货':'貨','质':'質','贩':'販','贪':'貪',
+    '贫':'貧','购':'購','贮':'貯','贯':'貫','贱':'賤','赌':'賭','赋':'賦',
+    '赏':'賞','赐':'賜','赔':'賠','赚':'賺','赛':'賽','赞':'贊','赵':'趙',
+    '趋':'趨','跃':'躍','践':'踐','踊':'踴','蹄':'蹄','蹈':'蹈','蹲':'蹲',
+    '躯':'軀','转':'轉','轮':'輪','软':'軟','轰':'轟','辅':'輔','辆':'輛',
+    '辈':'輩','辉':'輝','辑':'輯','输':'輸','辩':'辯','辫':'辮','边':'邊',
+    '达':'達','迁':'遷','过':'過','运':'運','还':'還','这':'這','进':'進',
+    '远':'遠','违':'違','连':'連','迟':'遲','适':'適','选':'選','逊':'遜',
+    '递':'遞','逻':'邏','遗':'遺','遥':'遙','邻':'鄰','郁':'鬱','郑':'鄭',
+    '鄙':'鄙','酝':'醞','酱':'醬','酿':'釀','释':'釋','钉':'釘','钓':'釣',
+    '钝':'鈍','钞':'鈔','钟':'鐘','钢':'鋼','钥':'鑰','钦':'欽','钧':'鈞',
+    '钨':'鎢','钩':'鉤','钱':'錢','钳':'鉗','钴':'鈷','钻':'鑽','铁':'鐵',
+    '铃':'鈴','铅':'鉛','铆':'鉚','铜':'銅','铝':'鋁','铠':'鎧','铡':'鍘',
+    '铣':'銑','铭':'銘','铲':'鏟','银':'銀','铸':'鑄','铺':'鋪','链':'鏈',
+    '销':'銷','锁':'鎖','锅':'鍋','锈':'鏽','锋':'鋒','锌':'鋅','锐':'銳',
+    '错':'錯','锡':'錫','锢':'錮','锣':'鑼','锤':'錘','锥':'錐','锦':'錦',
+    '键':'鍵','锭':'錠','锯':'鋸','锰':'錳','锻':'鍛','镀':'鍍','镇':'鎮',
+    '镐':'鎬','镑':'鎊','镖':'鏢','镜':'鏡','镭':'鐳','镰':'鐮','闪':'閃',
+    '闭':'閉','问':'問','闯':'闖','闲':'閒','间':'間','闷':'悶','阀':'閥',
+    '阁':'閣','阅':'閱','阔':'闊','阙':'闕','阳':'陽','阴':'陰','阵':'陣',
+    '阶':'階','际':'際','隐':'隱','隶':'隸','难':'難','雇':'僱','雏':'雛',
+    '雾':'霧','霁':'霽','霜':'霜','靖':'靖','静':'靜','鞋':'鞋','韩':'韓',
+    '韧':'韌','页':'頁','顶':'頂','项':'項','顺':'順','须':'須','顽':'頑',
+    '顾':'顧','颅':'顱','预':'預','颇':'頗','领':'領','颖':'穎','频':'頻',
+    '颗':'顆','题':'題','颜':'顏','额':'額','颤':'顫','风':'風','飞':'飛',
+    '饥':'飢','饰':'飾','饱':'飽','饲':'飼','饵':'餌','饶':'饒','饺':'餃',
+    '饼':'餅','馅':'餡','馆':'館','馈':'饋','驰':'馳','驱':'驅','驳':'駁',
+    '驴':'驢','驻':'駐','驾':'駕','骂':'罵','骄':'驕','验':'驗','骑':'騎',
+    '骗':'騙','骚':'騷','骤':'驟','骨':'骨','鬼':'鬼','魂':'魂','魏':'魏',
+    '鱼':'魚','鲁':'魯','鲜':'鮮','鲤':'鯉','鲭':'鯖','鲸':'鯨','鳄':'鱷',
+    '鸟':'鳥','鸡':'雞','鸣':'鳴','鸦':'鴉','鸭':'鴨','鸳':'鴛','鸵':'鴕',
+    '鸽':'鴿','鹃':'鵑','鹅':'鵝','鹊':'鵲','鹏':'鵬','鹤':'鶴','鹰':'鷹',
+    '鹿':'鹿','麦':'麥','麸':'麩','黄':'黃','黎':'黎','齐':'齊','齿':'齒',
+    '龄':'齡','龙':'龍','龟':'龜'
+  };
+  let result = '';
+  for (const ch of text) {
+    result += map[ch] || ch;
+  }
+  return result;
+}
+
+// ─── UI Controls ─────────────────────────────────────────────────────────────
+function switchView(view, tab) {
+  currentView = view;
+  document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('active'));
+  if (tab) tab.classList.add('active');
+  // auto-set sort based on view
+  if (view === 'bestselling') {
+    sortKey = 'velocity';
+    sortAsc = false;
+  } else if (view === 'profitable') {
+    sortKey = 'score';
+    sortAsc = false;
+  }
+  // Refresh chip highlights
+  document.querySelectorAll('.chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.sort === sortKey);
+  });
+  renderTable();
+}
+
+function toggleFilter() {
+  const el = document.getElementById('filterToggle');
+  const params = document.getElementById('filterParams');
+  const cb = document.getElementById('enableFilter');
+  cb.checked = !cb.checked;
+  el.classList.toggle('active', cb.checked);
+  params.classList.toggle('show', cb.checked);
+  applyFilter();
+}
+
+function setSort(key, chip) {
+  if (chip) {
+    document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+  }
+  if (sortKey === key) {
+    sortAsc = !sortAsc;
+  } else {
+    sortKey = key;
+    sortAsc = (key === 'sellersCount');
+  }
+  renderTable();
+}
+function applyFilter() { renderTable(); }
+
+function clearResults() {
+  allResults = [];
+  document.getElementById('tableSection').innerHTML =
+    '<div class="empty"><div class="icon">🔮</div><div>選擇資料中心與伺服器，然後點擊「開始掃描」</div></div>';
+  document.getElementById('statsRow').classList.add('hidden');
+  document.getElementById('filterBarSection').classList.add('hidden');
+  document.getElementById('progressSection').classList.add('hidden');
+  clearError();
+}
+
+// ─── Main Scan ───────────────────────────────────────────────────────────────
+async function startScan() {
+  clearError();
+  const worldSelect = document.getElementById('worldSelect');
+  const world = worldSelect.value;
+  const dcName = document.getElementById('dcSelect').value;
+  const maxIlvl = parseInt(document.getElementById('maxIlvl').value) || 999;
+  const scope = document.getElementById('regionScope').value;
+  const catList = getSelectedCategoryIds();
+  const directItemIds = getDirectItemIds();
+
+  if (!dcName) { showError('請先選擇資料中心'); return; }
+  if (!world) { showError('請選擇伺服器'); return; }
+  if (catList.length === 0 && directItemIds.length === 0) {
+    showError('請至少選擇一個掃描分類，或輸入物品 ID');
+    return;
+  }
+
+  // For DC scope, use the DC name; for world scope, use server name
+  const queryTarget = scope === 'dc' ? dcName : world;
+  window.QUERY_TARGET = queryTarget;
+
+  document.getElementById('scanBtn').disabled = true;
+  document.getElementById('progressSection').classList.remove('hidden');
+  document.getElementById('statsRow').classList.add('hidden');
+  document.getElementById('filterBarSection').classList.add('hidden');
+  document.getElementById('tableSection').innerHTML = '';
+  allResults = [];
+
+  try {
+    setProgress(2, '載入可交易物品清單...');
+    const marketable = await fetchJSON(`${UNI_BASE}/marketable`);
+    const marketableSet = new Set(marketable);
+    setProgress(10, `已載入 ${marketable.length.toLocaleString()} 個可交易物品`);
+
+    // Fetch items from Cafemaker by category
+    let allItems = [];
+    if (catList.length > 0) {
+      for (let ci = 0; ci < catList.length; ci++) {
+        const catId = catList[ci];
+        const meta = allCategoryMeta[catId];
+        const catName = meta ? (meta.nameTc || meta.nameCn) : catId;
+        setProgress(10 + Math.round((ci / catList.length) * 30), `取得 ${catName} 物品資料...`);
+
+        try {
+          let page = 1;
+          while (page <= 20) {
+            const url = `${CAFE_BASE}/search?indexes=Item&filters=ItemUICategory.ID=${catId},LevelItem<=${maxIlvl}&columns=ID,Name,Name_chs,Name_en,LevelItem,CanBeHq&limit=250&page=${page}`;
+            const data = await fetchJSON(url);
+            const results = data.Results || [];
+            if (results.length === 0) break;
+
+            for (const r of results) {
+              const id = r.ID;
+              const nameCn = r.Name_chs || r.Name || '';
+              const nameEn = r.Name_en || r.Name || '';
+              const ilvl = r.LevelItem ?? 0;
+              const canHq = !!r.CanBeHq;
+              if (id && marketableSet.has(id)) {
+                allItems.push({ id, nameCn, nameEn, ilvl, catId, canHq });
+              }
+            }
+
+            const pagination = data.Pagination || {};
+            if (page >= (pagination.PageTotal || 1)) break;
+            page++;
+            await sleep(80);
+          }
+        } catch (e) {
+          console.warn(`分類 ${catId} 載入失敗:`, e.message);
+        }
+      }
+    }
+
+    // Also add direct item IDs
+    if (directItemIds.length > 0) {
+      setProgress(35, `取得 ${directItemIds.length} 個指定物品資料...`);
+      // Fetch item info from Cafemaker for direct IDs
+      const batchSize = 50;
+      for (let i = 0; i < directItemIds.length; i += batchSize) {
+        const batch = directItemIds.slice(i, i + batchSize);
+        for (const itemId of batch) {
+          if (!marketableSet.has(itemId)) continue;
+          try {
+            const data = await fetchJSON(`${CAFE_BASE}/item/${itemId}?columns=ID,Name,Name_chs,Name_en,LevelItem,CanBeHq`);
+            if (data && data.ID) {
+              allItems.push({
+                id: data.ID,
+                nameCn: data.Name_chs || data.Name || '',
+                nameEn: data.Name_en || data.Name || '',
+                ilvl: data.LevelItem ?? 0,
+                catId: 0,
+                canHq: !!data.CanBeHq
+              });
+            }
+          } catch (e) {
+            console.warn(`物品 ${itemId} 載入失敗:`, e.message);
+          }
+        }
+        if (i + batchSize < directItemIds.length) await sleep(100);
+      }
+    }
+
+    // Deduplicate
+    const seen = new Set();
+    allItems = allItems.filter(item => { if (seen.has(item.id)) return false; seen.add(item.id); return true; });
+
+    setProgress(42, `共 ${allItems.length} 個可交易物品，正在查詢市場價格...`);
+    document.getElementById('statTotal').textContent = allItems.length.toLocaleString();
+
+    if (allItems.length === 0) {
+      throw new Error('未找到任何可交易物品。請確認分類選擇與物品等級設定。');
+    }
+
+    // Batch fetch: use /api/v2/{worldOrDc}/{itemIds} for full listings + history
+    // Then also fetch aggregated data for velocity
+    const BATCH = 100;
+    const batches = [];
+    for (let i = 0; i < allItems.length; i += BATCH) batches.push(allItems.slice(i, i + BATCH));
+
+    let processed = 0;
+    for (const batch of batches) {
+      const ids = batch.map(b => b.id).join(',');
+      try {
+        // Fetch full market data (listings + recentHistory) from the main endpoint
+        const mainUrl = `${UNI_BASE}/${queryTarget}/${ids}?listings=30&entries=30`;
+        const mainData = await fetchJSON(mainUrl);
+
+        // Also fetch aggregated data for velocity/averageSalePrice
+        const aggUrl = `${UNI_BASE}/aggregated/${queryTarget}/${ids}`;
+        let aggMap = {};
+        try {
+          const aggData = await fetchJSON(aggUrl);
+          for (const res of (aggData.results || [])) {
+            aggMap[res.itemId] = res;
+          }
+        } catch (e) { console.warn('Aggregated fetch failed for batch, continuing:', e.message); }
+
+        // Parse main data
+        let marketMap = {};
+        if (batch.length > 1 && mainData.items && typeof mainData.items === 'object') {
+          for (const [k, v] of Object.entries(mainData.items)) {
+            marketMap[v.itemID ?? parseInt(k)] = v;
+          }
+        } else if (mainData.itemID) {
+          marketMap[mainData.itemID] = mainData;
+        }
+
+        for (const meta of batch) {
+          const m = marketMap[meta.id];
+          const agg = aggMap[meta.id];
+          if (!m && !agg) continue;
+
+          // Sellers count from listings
+          const listings = (m && m.listings) || [];
+          const sellersCount = new Set(listings.map(l => l.retainerName || l.sellerID || '')).size;
+
+          // Velocity from aggregated data (more accurate, 4-day window)
+          const scopeKey = scope === 'dc' ? 'dc' : 'world';
+          let velocity = 0;
+          if (agg) {
+            const nq = agg.nq || {};
+            const hq = agg.hq || {};
+            const nqVel = (nq.dailySaleVelocity && nq.dailySaleVelocity[scopeKey]) ? nq.dailySaleVelocity[scopeKey].quantity || 0 : 0;
+            const hqVel = (hq.dailySaleVelocity && hq.dailySaleVelocity[scopeKey]) ? hq.dailySaleVelocity[scopeKey].quantity || 0 : 0;
+            velocity = nqVel + hqVel;
+          }
+          // Fallback to main data velocity
+          if (velocity === 0 && m) {
+            velocity = (m.regularSaleVelocity || 0);
+          }
+
+          // Price: prefer aggregated averageSalePrice, then median of recent history
+          let avgPrice = 0;
+          let priceSource = 'none';
+          if (agg) {
+            const nq = agg.nq || {};
+            const avg = (nq.averageSalePrice && nq.averageSalePrice[scopeKey]) ? nq.averageSalePrice[scopeKey].price || 0 : 0;
+            if (avg > 0) { avgPrice = Math.round(avg); priceSource = 'avgSalePrice'; }
+          }
+          if (avgPrice === 0 && m) {
+            const recentHistory = m.recentHistory || [];
+            const prices = recentHistory.map(h => h.pricePerUnit).filter(p => p > 0);
+            const med = median(prices);
+            if (med > 0) { avgPrice = med; priceSource = 'median_recent'; }
+            else if (m.averagePrice > 0) { avgPrice = Math.round(m.averagePrice); priceSource = 'averagePrice'; }
+            else if (m.minPrice > 0) { avgPrice = m.minPrice; priceSource = 'minPrice'; }
+          }
+
+          // Total sold count from recent history
+          const recentHistory = (m && m.recentHistory) || [];
+          const totalSoldQty = recentHistory.reduce((sum, h) => sum + (h.quantity || 1), 0);
+          const uniqueBuyers = new Set(recentHistory.map(h => h.buyerName || '')).size;
+
+          // Current lowest listing price from board
+          const allListings = (m && Array.isArray(m.listings)) ? m.listings : [];
+          const listingPrices = allListings.map(l => l.pricePerUnit).filter(p => p > 0);
+          const minListingPrice = listingPrices.length > 0
+            ? Math.min(...listingPrices)
+            : (m && m.minPrice > 0 ? m.minPrice : 0);
+
+          // Average of current board listings (not historical sales)
+          const boardAvgPrice = listingPrices.length > 0
+            ? Math.round(listingPrices.reduce((a, b) => a + b, 0) / listingPrices.length)
+            : avgPrice;
+
+          // Score = velocity × avgPrice ÷ (sellers + 1)
+          const score = Math.round((velocity * avgPrice) / (sellersCount + 1));
+
+          allResults.push({
+            id: meta.id,
+            nameCn: meta.nameCn,
+            nameEn: meta.nameEn,
+            ilvl: meta.ilvl,
+            canHq: meta.canHq,
+            avgPrice,
+            minListingPrice,
+            boardAvgPrice,
+            velocity,
+            sellersCount,
+            score,
+            priceSource,
+            totalSoldQty,
+            uniqueBuyers,
+            rawMarket: m || {}
+          });
+        }
+      } catch (e) {
+        console.warn('批次查詢失敗:', e.message);
+      }
+
+      processed += batch.length;
+      setProgress(42 + Math.round((processed / allItems.length) * 55),
+        `查詢市場價格中... ${processed}/${allItems.length}`);
+      await sleep(200); // Respect rate limit (25 req/s)
+    }
+
+    setProgress(97, `掃描完成！正在處理資料...`);
+
+    // 簡體→繁體中文轉換
+    try {
+      await maybeLoadOpenCC();
+      for (const r of allResults) {
+        if (r.nameCn) {
+          r.nameCn = toTraditionalSync(r.nameCn);
+        }
+      }
+    } catch (e) { console.warn('繁體轉換失敗', e); }
+
+    setProgress(100, `掃描完成！共 ${allResults.length} 筆有市場資料的物品`);
+
+    // Stats
+    document.getElementById('statResults').textContent = allResults.length.toLocaleString();
+    document.getElementById('statServer').textContent = `${world} (${dcName})`;
+    if (allResults.length > 0) {
+      const topScore = allResults.reduce((a, b) => b.score > a.score ? b : a);
+      const topVel = allResults.reduce((a, b) => b.velocity > a.velocity ? b : a);
+      document.getElementById('statTopScore').textContent = (topScore.nameCn || topScore.nameEn).substring(0, 8);
+      document.getElementById('statTopVelocity').textContent = (topVel.nameCn || topVel.nameEn).substring(0, 8);
+    }
+
+    document.getElementById('statsRow').classList.remove('hidden');
+    document.getElementById('filterBarSection').classList.remove('hidden');
+    currentView = 'profitable';
+    sortKey = 'score';
+    sortAsc = false;
+    document.querySelectorAll('.view-tab').forEach(t => t.classList.toggle('active', t.dataset.view === 'profitable'));
+    document.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c.dataset.sort === 'score'));
+    renderTable();
+
+  } catch (e) {
+    showError(e.message);
+    setProgress(0, '');
+  } finally {
+    document.getElementById('scanBtn').disabled = false;
+  }
+}
+
+// ─── Render Table ────────────────────────────────────────────────────────────
+function renderTable() {
+  const searchTerm = (document.getElementById('searchFilter')?.value || '').toLowerCase();
+  const useFilter = document.getElementById('enableFilter')?.checked ?? false;
+  const fMinPrice = useFilter ? (parseInt(document.getElementById('fMinPrice')?.value) || 0) : 0;
+  const fMinVelocity = useFilter ? (parseFloat(document.getElementById('fMinVelocity')?.value) || 0) : 0;
+  const fMaxSellers = useFilter ? (parseInt(document.getElementById('fMaxSellers')?.value) || 9999) : 9999;
+
+  let results = allResults.filter(r => {
+    if (searchTerm) {
+      const match = (r.nameCn || '').toLowerCase().includes(searchTerm)
+                 || (r.nameEn || '').toLowerCase().includes(searchTerm);
+      if (!match) return false;
+    }
+    if (useFilter) {
+      if (r.avgPrice < fMinPrice) return false;
+      if (r.velocity < fMinVelocity) return false;
+      if (r.sellersCount > fMaxSellers) return false;
+    }
+    // View filters
+    if (currentView === 'bestselling') {
+      if (r.velocity <= 0) return false; // must have sales
+    } else if (currentView === 'profitable') {
+      if (r.score <= 0) return false; // must have positive score
+    }
+    return true;
+  });
+
+  // Sort
+  results.sort((a, b) => {
+    let va = a[sortKey] ?? 0, vb = b[sortKey] ?? 0;
+    return sortAsc ? (va - vb) : (vb - va);
+  });
+
+  document.getElementById('statResults').textContent = results.length.toLocaleString();
+
+  const maxScore = Math.max(...results.map(r => r.score), 1);
+  const maxVelocity = Math.max(...results.map(r => r.velocity), 1);
+
+  if (results.length === 0) {
+    document.getElementById('tableSection').innerHTML =
+      '<div class="empty"><div class="icon">🔍</div><div>沒有符合條件的物品，請放寬篩選條件或切換分頁</div></div>';
+    return;
+  }
+
+  const display = results.slice(0, 200);
+  const queryTarget = window.QUERY_TARGET || '';
+
+  const rows = display.map((r, i) => {
+    const scorePct = Math.round((r.score / maxScore) * 100);
+    const velPct = Math.round((r.velocity / maxVelocity) * 100);
+    const sellerClass = r.sellersCount <= 5 ? 'low' : r.sellersCount <= 15 ? 'mid' : 'high';
+    const isHot = r.velocity > maxVelocity * 0.6 && r.velocity > 0;
+    const isSafe = r.sellersCount <= 5 && r.velocity >= 3;
+    const isProfit = r.score > maxScore * 0.6 && r.score > 0;
+    const displayName = r.nameCn || r.nameEn;
+    const subName = r.nameCn ? r.nameEn : '';
+    const revenue = Math.round(r.velocity * r.avgPrice);
+
+    return `<tr>
+      <td style="color:var(--text-dim);font-size:12px;">${i+1}</td>
+      <td>
+        <div class="item-name">${escHtml(displayName)}${isHot ? '<span class="badge badge-hot">🔥 熱賣</span>' : ''}${isSafe ? '<span class="badge badge-safe">✓ 低競爭</span>' : ''}${isProfit ? '<span class="badge badge-profit">💎 高利潤</span>' : ''}</div>
+        <div class="item-sub">${escHtml(subName)}${subName ? ' · ' : ''}iLv ${r.ilvl}${r.canHq ? ' · 可 HQ' : ''}</div>
+      </td>
+      <td><span class="price">${r.minListingPrice > 0 ? fmtGil(r.minListingPrice) : '<span style="color:var(--text-dim)">—</span>'}</span></td>
+      <td><span class="price">${fmtGil(r.boardAvgPrice)}</span></td>
+      <td>
+        <details class="market-details" data-item-id="${r.id}" data-query-target="${escHtml(queryTarget)}" style="font-size:12px;color:var(--text-dim)">
+          <summary style="cursor:pointer">展開看板/成交細節</summary>
+          <div style="padding:6px 8px 2px;">
+            <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:6px;">
+              顯示筆數：<input type="range" min="5" max="30" value="10" class="detail-slider" data-item-id="${r.id}"
+                style="flex:1;max-width:160px;accent-color:var(--accent);cursor:pointer;"
+                oninput="updateDetailCount(${r.id}, this.value)">
+              <span id="detail-count-label-${r.id}" style="min-width:28px;text-align:right;">10</span>
+            </label>
+          </div>
+          <div style="display:flex;gap:12px;padding:8px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:260px;">
+              <div style="font-size:12px;color:var(--gold);margin-bottom:6px;">最低刊價（看板）<span style="color:var(--text-dim);font-size:11px;margin-left:4px;">${(() => { const c = Array.isArray(r.rawMarket.listings) ? r.rawMarket.listings.length : 0; return c > 0 ? '共 ' + c + ' 筆' : ''; })()}</span></div>
+              <div style="max-height:320px;overflow-y:auto;" id="listings-scroll-${r.id}">
+              <table style="width:100%;font-size:13px;border-collapse:collapse;color:var(--text);">
+                <thead><tr style="color:var(--text-dim);font-size:11px;position:sticky;top:0;background:var(--surface);"><th style="text-align:left;padding:6px">#</th><th style="text-align:left;padding:6px">價格</th><th style="text-align:left;padding:6px">數量</th><th style="text-align:left;padding:6px">總計</th><th style="text-align:left;padding:6px">賣家</th><th style="text-align:left;padding:6px">伺服器</th></tr></thead>
+                <tbody id="listings-${r.id}">
+                ${(() => {
+                  const ls = Array.isArray(r.rawMarket.listings) ? r.rawMarket.listings.slice().sort((a,b) => (a.pricePerUnit||0)-(b.pricePerUnit||0)) : [];
+                  return ls.slice(0,10).map((l, idx) => {
+                    const price = l.pricePerUnit || 0;
+                    const qty = l.quantity || 1;
+                    const total = l.total || price * qty;
+                    const seller = l.retainerName || '';
+                    const wn = l.worldName || '';
+                    return `<tr><td style="padding:6px">${idx+1}</td><td style="padding:6px">${fmtGil(price)}</td><td style="padding:6px">${qty}</td><td style="padding:6px">${fmtGil(total)}</td><td style="padding:6px">${escHtml(seller)}</td><td style="padding:6px">${escHtml(wn)}</td></tr>`;
+                  }).join('') || '<tr><td colspan="6" style="padding:6px;color:var(--text-dim)">無刊價資料</td></tr>';
+                })()}
+                </tbody>
+              </table>
+              </div>
+            </div>
+            <div style="flex:1;min-width:260px;">
+              <div style="font-size:12px;color:var(--gold);margin-bottom:6px;">最近售出記錄 <span style="color:var(--text-dim);font-size:11px;margin-left:4px;">${(() => { const c = (r.rawMarket.recentHistory || []).length; return c > 0 ? '共 ' + c + ' 筆' : ''; })()}</span></div>
+              <div style="max-height:320px;overflow-y:auto;" id="recent-scroll-${r.id}">
+              <table style="width:100%;font-size:13px;border-collapse:collapse;color:var(--text);">
+                <thead><tr style="color:var(--text-dim);font-size:11px;position:sticky;top:0;background:var(--surface);"><th style="text-align:left;padding:6px">#</th><th style="text-align:left;padding:6px">價格</th><th style="text-align:left;padding:6px">數量</th><th style="text-align:left;padding:6px">總計</th><th style="text-align:left;padding:6px">買家</th><th style="text-align:left;padding:6px">時間</th></tr></thead>
+                <tbody id="recent-${r.id}">
+                ${(() => {
+                  const hist = r.rawMarket.recentHistory || [];
+                  return hist.slice(0,10).map((h, idx) => {
+                    const price = h.pricePerUnit || 0;
+                    const qty = h.quantity || 1;
+                    const total = h.total || price * qty;
+                    const buyer = h.buyerName || '';
+                    const ago = timeAgo(h.timestamp);
+                    return `<tr><td style="padding:6px">${idx+1}</td><td style="padding:6px">${fmtGil(price)}</td><td style="padding:6px">${qty}</td><td style="padding:6px">${fmtGil(total)}</td><td style="padding:6px">${escHtml(buyer)}</td><td style="padding:6px">${escHtml(ago)}</td></tr>`;
+                  }).join('') || '<tr><td colspan="6" style="padding:6px;color:var(--text-dim)">無成交資料</td></tr>';
+                })()}
+                </tbody>
+              </table>
+              </div>
+            </div>
+          </div>
+        </details>
+      </td>
+      <td><span class="velocity">${r.velocity.toFixed(1)}</span> <span style="color:var(--text-dim);font-size:11px;">/ 日</span></td>
+      <td>
+        <span style="color:var(--text-dim);font-size:11px;">${r.totalSoldQty} 個</span>
+        <span style="color:var(--text-dim);font-size:10px;margin-left:4px;">(${r.uniqueBuyers} 人)</span>
+      </td>
+      <td><span class="sellers ${sellerClass}">${r.sellersCount}</span></td>
+      <td><span class="price" style="color:var(--green);font-size:12px;">${fmtGil(revenue)}</span></td>
+      <td>
+        <div class="score-bar-wrap">
+          <div class="score-bar" style="width:${Math.min(scorePct, 80)}px;max-width:80px;"></div>
+          <span class="score-val">${fmtCompact(r.score)}</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const viewDesc = currentView === 'bestselling'
+    ? '🔥 最熱賣產品：依日銷售量排序，銷量越高代表越搶手'
+    : currentView === 'profitable'
+    ? '💰 最值得販賣：依綜合分數排序（日銷量 × 均價 ÷ 賣家數），分數越高利潤潛力越大'
+    : '📋 全部物品（無過濾）';
+
+  document.getElementById('tableSection').innerHTML = `
+    <div style="padding:8px 14px;font-size:12px;color:var(--accent);margin-bottom:8px;border-left:3px solid var(--accent);background:rgba(74,143,207,0.06);">${viewDesc}</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>#</th>
+          <th onclick="setSort('nameCn')">物品名稱 <span class="sort-icon">⇅</span></th>
+          <th onclick="setSort('minListingPrice')">看板最低價 <span class="sort-icon">${sortKey==='minListingPrice' ? (sortAsc?'▲':'▼') : '⇅'}</span></th>
+          <th onclick="setSort('boardAvgPrice')">看板均價 <span class="sort-icon">${sortKey==='boardAvgPrice' ? (sortAsc?'▲':'▼') : '⇅'}</span></th>
+          <th>詳細</th>
+          <th onclick="setSort('velocity')">日銷量 <span class="sort-icon">${sortKey==='velocity' ? (sortAsc?'▲':'▼') : '⇅'}</span></th>
+          <th onclick="setSort('totalSoldQty')">已售出 <span class="sort-icon">${sortKey==='totalSoldQty' ? (sortAsc?'▲':'▼') : '⇅'}</span></th>
+          <th onclick="setSort('sellersCount')">賣家數 <span class="sort-icon">${sortKey==='sellersCount' ? (sortAsc?'▲':'▼') : '⇅'}</span></th>
+          <th>預估日收入</th>
+          <th onclick="setSort('score')" class="${sortKey==='score'?'sorted':''}">綜合分數 <span class="sort-icon">${sortKey==='score' ? (sortAsc?'▲':'▼') : '⇅'}</span></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="padding:10px 0;font-size:12px;color:var(--text-dim);">
+      顯示 ${display.length}${results.length > 200 ? ` / ${results.length}` : ''} 筆結果
+      · 綜合分數 = 日銷量 × 均價 ÷ (賣家數 + 1)
+      · 資料來源：<a href="https://universalis.app" target="_blank" style="color:var(--accent);">Universalis</a>
+    </div>`;
+
+  setTimeout(() => attachDetailsHandlers(), 100);
+}
+
+// ─── Lazy Load Detail ────────────────────────────────────────────────────────
+async function fetchItemDetails(queryTarget, itemId) {
+  try {
+    const url = `${UNI_BASE}/${queryTarget}/${itemId}?listings=30&entries=30`;
+    const data = await fetchJSON(url);
+    if (data.items && data.items[itemId]) return data.items[itemId];
+    if (data.itemID) return data;
+    return data;
+  } catch (e) { console.warn('fetchItemDetails failed', e); return null; }
+}
+
+async function refreshDetails(itemId) {
+  const details = document.querySelector(`details.market-details[data-item-id="${itemId}"]`);
+  if (!details) return;
+  const q = details.getAttribute('data-query-target') || window.QUERY_TARGET || '';
+  const tbodyList = document.getElementById(`listings-${itemId}`);
+  const tbodyRecent = document.getElementById(`recent-${itemId}`);
+  if (!tbodyList && !tbodyRecent) return;
+  try {
+    const d = await fetchItemDetails(q, itemId);
+    if (!d) return;
+    const listings = d.listings || [];
+    const recent = d.recentHistory || [];
+    // Determine how many rows to show based on slider
+    const slider = details.querySelector('.detail-slider');
+    const showCount = slider ? parseInt(slider.value) || 10 : 10;
+    // Store refreshed data on the details element for slider re-render
+    details.__listingsData = listings;
+    details.__recentData = recent;
+    if (tbodyList) {
+      const ls = listings.slice().sort((a,b) => (a.pricePerUnit||0) - (b.pricePerUnit||0));
+      tbodyList.innerHTML = ls.slice(0, showCount).map((l, idx) => {
+        const price = l.pricePerUnit || 0;
+        const qty = l.quantity || 1;
+        const total = l.total || price * qty;
+        const seller = l.retainerName || '';
+        const wn = l.worldName || '';
+        return `<tr><td style="padding:6px">${idx+1}</td><td style="padding:6px">${fmtGil(price)}</td><td style="padding:6px">${qty}</td><td style="padding:6px">${fmtGil(total)}</td><td style="padding:6px">${escHtml(seller)}</td><td style="padding:6px">${escHtml(wn)}</td></tr>`;
+      }).join('') || '<tr><td colspan="6" style="padding:6px">無資料</td></tr>';
+    }
+    if (tbodyRecent) {
+      tbodyRecent.innerHTML = recent.slice(0, showCount).map((h, idx) => {
+        const price = h.pricePerUnit || 0;
+        const qty = h.quantity || 1;
+        const total = h.total || price * qty;
+        const buyer = h.buyerName || '';
+        const ago = timeAgo(h.timestamp);
+        return `<tr><td style="padding:6px">${idx+1}</td><td style="padding:6px">${fmtGil(price)}</td><td style="padding:6px">${qty}</td><td style="padding:6px">${fmtGil(total)}</td><td style="padding:6px">${escHtml(buyer)}</td><td style="padding:6px">${escHtml(ago)}</td></tr>`;
+      }).join('') || '<tr><td colspan="6" style="padding:6px">無成交資料</td></tr>';
+    }
+  } catch(e) { console.warn('refreshDetails failed', e); }
+}
+
+function updateDetailCount(itemId, count) {
+  count = parseInt(count) || 10;
+  const label = document.getElementById(`detail-count-label-${itemId}`);
+  if (label) label.textContent = count;
+
+  const details = document.querySelector(`details.market-details[data-item-id="${itemId}"]`);
+  if (!details) return;
+
+  // Use cached data from rawMarket or refreshed data
+  const result = allResults.find(r => String(r.id) === String(itemId));
+  const listingsData = details.__listingsData || (result && result.rawMarket && Array.isArray(result.rawMarket.listings) ? result.rawMarket.listings : []);
+  const recentData = details.__recentData || (result && result.rawMarket ? result.rawMarket.recentHistory || [] : []);
+
+  const tbodyList = document.getElementById(`listings-${itemId}`);
+  const tbodyRecent = document.getElementById(`recent-${itemId}`);
+
+  if (tbodyList) {
+    const ls = listingsData.slice().sort((a,b) => (a.pricePerUnit||0) - (b.pricePerUnit||0));
+    tbodyList.innerHTML = ls.slice(0, count).map((l, idx) => {
+      const price = l.pricePerUnit || 0;
+      const qty = l.quantity || 1;
+      const total = l.total || price * qty;
+      const seller = l.retainerName || '';
+      const wn = l.worldName || '';
+      return `<tr><td style="padding:6px">${idx+1}</td><td style="padding:6px">${fmtGil(price)}</td><td style="padding:6px">${qty}</td><td style="padding:6px">${fmtGil(total)}</td><td style="padding:6px">${escHtml(seller)}</td><td style="padding:6px">${escHtml(wn)}</td></tr>`;
+    }).join('') || '<tr><td colspan="6" style="padding:6px;color:var(--text-dim)">無刊價資料</td></tr>';
+  }
+  if (tbodyRecent) {
+    tbodyRecent.innerHTML = recentData.slice(0, count).map((h, idx) => {
+      const price = h.pricePerUnit || 0;
+      const qty = h.quantity || 1;
+      const total = h.total || price * qty;
+      const buyer = h.buyerName || '';
+      const ago = timeAgo(h.timestamp);
+      return `<tr><td style="padding:6px">${idx+1}</td><td style="padding:6px">${fmtGil(price)}</td><td style="padding:6px">${qty}</td><td style="padding:6px">${fmtGil(total)}</td><td style="padding:6px">${escHtml(buyer)}</td><td style="padding:6px">${escHtml(ago)}</td></tr>`;
+    }).join('') || '<tr><td colspan="6" style="padding:6px;color:var(--text-dim)">無成交資料</td></tr>';
+  }
+}
+
+function attachDetailsHandlers() {
+  document.querySelectorAll('details.market-details').forEach(d => {
+    if (d.__attached) return;
+    d.__attached = true;
+    d.addEventListener('toggle', () => {
+      if (!d.open) return;
+      const itemId = d.getAttribute('data-item-id');
+      refreshDetails(itemId);
+    });
+  });
+}
+
+// ─── Boot ────────────────────────────────────────────────────────────────────
+initDcWorlds();
+</script>
+</body>
+</html>
