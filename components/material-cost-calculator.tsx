@@ -4,10 +4,10 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import type { FlattenedMaterial, MaterialTreeNode } from '@/types';
 import { ServerSelector, useServerConfig } from './server-selector';
 import {
-  fetchMarketPrices,
   calculateSmartCost,
   type MarketPriceInfo,
 } from '@/hooks/use-universalis';
+import { useMarketPrices } from '@/hooks/use-market-prices';
 
 // 材料來源選擇：購買或自製
 type MaterialSource = 'buy' | 'craft';
@@ -99,11 +99,8 @@ export function MaterialCostCalculator({
   // 伺服器設定
   const serverConfig = useServerConfig();
 
-  // 市場價格資料
-  const [marketPrices, setMarketPrices] = useState<Map<number, MarketPriceInfo>>(new Map());
-  const [isFetchingPrices, setIsFetchingPrices] = useState(false);
-  const [fetchProgress, setFetchProgress] = useState({ current: 0, total: 0 });
-  const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
+  // 市場價格資料（使用共用 Hook）
+  const { marketPrices, isFetchingPrices, fetchProgress, lastFetchTime, fetchError, fetchPrices, clearError } = useMarketPrices(serverConfig.worldId);
   const [productMarketPrice, setProductMarketPrice] = useState<MarketPriceInfo | null>(null);
 
   // 載入外部資料（從生產紀錄）
@@ -303,81 +300,58 @@ export function MaterialCostCalculator({
 
   // 查詢所有材料的市場價格
   const fetchAllMarketPrices = useCallback(async () => {
-    setIsFetchingPrices(true);
-    setFetchProgress({ current: 0, total: 0 });
-
-    try {
-      // 收集所有需要查詢的物品 ID（包含成品）
-      const itemIds: number[] = [];
-      actualMaterials.forEach((m) => {
-        itemIds.push(m.itemId);
-      });
-      // 加入成品 ID
-      if (materialTree) {
-        itemIds.push(materialTree.itemId);
-      }
-
-      const uniqueIds = [...new Set(itemIds)];
-      const prices = await fetchMarketPrices(
-        serverConfig.worldId,
-        uniqueIds,
-        (current, total) => setFetchProgress({ current, total })
-      );
-
-      setMarketPrices(prices);
-      setLastFetchTime(new Date());
-
-      // 提取成品的市場價格
-      if (materialTree) {
-        const productPrice = prices.get(materialTree.itemId);
-        setProductMarketPrice(productPrice || null);
-      }
-
-      // 自動填入最低價格到成本條目
-      setCostEntries((prev) => {
-        const newMap = new Map(prev);
-        actualMaterials.forEach((m) => {
-          const priceInfo = prices.get(m.itemId);
-          const entry = newMap.get(m.itemId);
-          if (priceInfo && entry) {
-            // 根據是否為 HQ 選擇對應的最低價
-            const isHQ = entry.isHQ || false;
-            const minPrice = isHQ ? priceInfo.minPriceHQ : priceInfo.minPriceNQ;
-            
-            // 如果有 listings，使用智慧成本計算
-            const requiredQty = actualRequirements.get(m.itemId) || m.totalAmount * multiplier;
-            if (priceInfo.listings.length > 0 && requiredQty > 0) {
-              const smart = calculateSmartCost(priceInfo.listings, requiredQty, isHQ);
-              newMap.set(m.itemId, {
-                ...entry,
-                unitPrice: smart.avgUnitCost > 0 ? smart.avgUnitCost : (minPrice || 0),
-                purchaseQty: requiredQty,
-              });
-            } else {
-              newMap.set(m.itemId, {
-                ...entry,
-                unitPrice: minPrice || 0,
-                purchaseQty: requiredQty,
-              });
-            }
-          }
-        });
-        return newMap;
-      });
-
-      // 自動填入成品售價
-      if (materialTree) {
-        const productPrice = prices.get(materialTree.itemId);
-        if (productPrice && productPrice.minPriceNQ > 0) {
-          setSellPrice(productPrice.minPriceNQ);
-        }
-      }
-    } catch (e) {
-      console.error('查詢市場價格失敗:', e);
-    } finally {
-      setIsFetchingPrices(false);
+    // 收集所有需要查詢的物品 ID（包含成品）
+    const itemIds: number[] = actualMaterials.map((m) => m.itemId);
+    if (materialTree) {
+      itemIds.push(materialTree.itemId);
     }
-  }, [actualMaterials, materialTree, serverConfig.worldId, multiplier, actualRequirements]);
+
+    const prices = await fetchPrices(itemIds);
+    if (prices.size === 0) return;
+
+    // 提取成品的市場價格
+    if (materialTree) {
+      const productPrice = prices.get(materialTree.itemId);
+      setProductMarketPrice(productPrice || null);
+    }
+
+    // 自動填入最低價格到成本條目
+    setCostEntries((prev) => {
+      const newMap = new Map(prev);
+      actualMaterials.forEach((m) => {
+        const priceInfo = prices.get(m.itemId);
+        const entry = newMap.get(m.itemId);
+        if (priceInfo && entry) {
+          const isHQ = entry.isHQ || false;
+          const minPrice = isHQ ? priceInfo.minPriceHQ : priceInfo.minPriceNQ;
+          const requiredQty = actualRequirements.get(m.itemId) || m.totalAmount * multiplier;
+          if (priceInfo.listings.length > 0 && requiredQty > 0) {
+            const smart = calculateSmartCost(priceInfo.listings, requiredQty, isHQ);
+            newMap.set(m.itemId, {
+              ...entry,
+              unitPrice: smart.avgUnitCost > 0 ? smart.avgUnitCost : (minPrice || 0),
+              purchaseQty: requiredQty,
+            });
+          } else {
+            newMap.set(m.itemId, {
+              ...entry,
+              unitPrice: minPrice || 0,
+              purchaseQty: requiredQty,
+            });
+          }
+        }
+      });
+      return newMap;
+    });
+
+    // 自動填入成品售價
+    if (materialTree) {
+      const productPrice = prices.get(materialTree.itemId);
+      if (productPrice && productPrice.minPriceNQ > 0) {
+        setSellPrice(productPrice.minPriceNQ);
+      }
+    }
+  }, [actualMaterials, materialTree, fetchPrices, multiplier, actualRequirements]);
 
   // 計算總成本（使用實際購買數量）
   const calculations = useMemo(() => {
@@ -704,6 +678,14 @@ export function MaterialCostCalculator({
           </span>
         )}
       </div>
+
+      {/* 查價錯誤提示 */}
+      {fetchError && (
+        <div className="flex items-center justify-between p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-300">
+          <span>⚠️ {fetchError}</span>
+          <button onClick={clearError} className="text-red-500 hover:text-red-700 dark:hover:text-red-200 ml-2">✕</button>
+        </div>
+      )}
 
       {/* 中間製品（可製作的材料） */}
       {craftableMaterials.length > 0 && (

@@ -54,16 +54,30 @@ export function saveServerConfig(config: { dcName: string; worldId: number; worl
   }
 }
 
-// 取得資料中心與伺服器列表
+// 取得資料中心與伺服器列表（模組層級快取，避免多個元件重複請求）
+let _dcWorldsCache: { dataCenters: DataCenter[]; worlds: World[] } | null = null;
+let _dcWorldsPromise: Promise<{ dataCenters: DataCenter[]; worlds: World[] }> | null = null;
+
 export async function fetchDataCentersAndWorlds(): Promise<{
   dataCenters: DataCenter[];
   worlds: World[];
 }> {
-  const [dcs, worlds] = await Promise.all([
-    fetcher<DataCenter[]>(`${UNIVERSALIS_BASE}/data-centers`),
-    fetcher<World[]>(`${UNIVERSALIS_BASE}/worlds`),
-  ]);
-  return { dataCenters: dcs, worlds };
+  if (_dcWorldsCache) return _dcWorldsCache;
+  // 如果已有進行中的請求，共用同一個 Promise（避免並發重複呼叫）
+  if (_dcWorldsPromise) return _dcWorldsPromise;
+
+  _dcWorldsPromise = (async () => {
+    const [dcs, worlds] = await Promise.all([
+      fetcher<DataCenter[]>(`${UNIVERSALIS_BASE}/data-centers`),
+      fetcher<World[]>(`${UNIVERSALIS_BASE}/worlds`),
+    ]);
+    const result = { dataCenters: dcs, worlds };
+    _dcWorldsCache = result;
+    _dcWorldsPromise = null;
+    return result;
+  })();
+
+  return _dcWorldsPromise;
 }
 
 // ============================================

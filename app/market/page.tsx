@@ -9,8 +9,11 @@ import {
   fetchDataCentersAndWorlds,
   type DataCenter,
   type World,
+  loadServerConfig,
+  saveServerConfig,
+  DEFAULT_SERVER_CONFIG,
 } from '@/hooks/use-universalis';
-import { getItemNameTw } from '@/lib/i18n/tw-translation';
+import { getItemNameTw, s2t } from '@/lib/i18n/tw-translation';
 
 // ============================================
 // 常數 & 類型
@@ -124,88 +127,6 @@ function timeAgo(ts: number): string {
   return `${Math.round(mins / 1440)} 天前`;
 }
 
-// 簡體→繁體 fallback 對照表（常用 FF14 用字）
-const S2T_MAP: Record<string, string> = {
-  '与':'與','万':'萬','丝':'絲','两':'兩','严':'嚴','丰':'豐','临':'臨','为':'為',
-  '举':'舉','义':'義','乐':'樂','书':'書','买':'買','乱':'亂','争':'爭','云':'雲',
-  '亚':'亞','产':'產','亲':'親','仅':'僅','从':'從','仓':'倉','仪':'儀','们':'們',
-  '价':'價','众':'眾','优':'優','会':'會','伞':'傘','伟':'偉','传':'傳','伤':'傷',
-  '伦':'倫','伪':'偽','体':'體','余':'餘','侠':'俠','侣':'侶','债':'債','倾':'傾',
-  '养':'養','兰':'蘭','关':'關','兴':'興','兽':'獸','军':'軍','农':'農','冲':'沖',
-  '决':'決','冻':'凍','净':'淨','凤':'鳳','击':'擊','凯':'凱','几':'幾','创':'創',
-  '划':'劃','制':'製','剂':'劑','剑':'劍','剧':'劇','办':'辦','务':'務','动':'動',
-  '劳':'勞','势':'勢','医':'醫','华':'華','单':'單','卖':'賣','卫':'衛','厂':'廠',
-  '厅':'廳','历':'歷','压':'壓','参':'參','双':'雙','发':'發','变':'變','叶':'葉',
-  '号':'號','听':'聽','启':'啟','员':'員','周':'週','响':'響','唤':'喚','园':'園',
-  '围':'圍','国':'國','图':'圖','圆':'圓','圣':'聖','场':'場','坏':'壞','块':'塊',
-  '坚':'堅','垒':'壘','声':'聲','处':'處','备':'備','复':'復','头':'頭','夺':'奪',
-  '奋':'奮','奖':'獎','奥':'奧','妇':'婦','妆':'妝','学':'學','宁':'寧','宝':'寶',
-  '实':'實','宠':'寵','审':'審','宫':'宮','对':'對','寻':'尋','导':'導','将':'將',
-  '尔':'爾','尘':'塵','尝':'嘗','尽':'盡','层':'層','岁':'歲','岛':'島','岭':'嶺',
-  '峡':'峽','币':'幣','师':'師','带':'帶','帅':'帥','帐':'帳','帮':'幫','干':'乾',
-  '广':'廣','庄':'莊','庆':'慶','库':'庫','应':'應','庙':'廟','废':'廢','开':'開',
-  '异':'異','弃':'棄','张':'張','弯':'彎','弹':'彈','强':'強','归':'歸','当':'當',
-  '录':'錄','彻':'徹','径':'徑','征':'徵','忆':'憶','忧':'憂','怀':'懷','态':'態',
-  '总':'總','恋':'戀','恶':'惡','惊':'驚','惧':'懼','惨':'慘','惯':'慣','愿':'願',
-  '懒':'懶','戏':'戲','战':'戰','户':'戶','执':'執','扩':'擴','扫':'掃','扬':'揚',
-  '扰':'擾','护':'護','报':'報','拟':'擬','拥':'擁','择':'擇','挡':'擋','挤':'擠',
-  '挥':'揮','损':'損','换':'換','据':'據','摇':'搖','操':'操','敌':'敵','断':'斷',
-  '无':'無','旧':'舊','时':'時','显':'顯','暂':'暫','术':'術','机':'機','杀':'殺',
-  '杂':'雜','权':'權','条':'條','来':'來','极':'極','构':'構','枪':'槍','标':'標',
-  '样':'樣','档':'檔','桥':'橋','梦':'夢','检':'檢','楼':'樓','欢':'歡','残':'殘',
-  '毁':'毀','气':'氣','汇':'匯','汉':'漢','沟':'溝','没':'沒','泪':'淚','泽':'澤',
-  '洁':'潔','浅':'淺','浆':'漿','测':'測','浓':'濃','海':'海','涌':'湧','润':'潤',
-  '温':'溫','游':'遊','湾':'灣','满':'滿','潜':'潛','灵':'靈','灾':'災','炉':'爐',
-  '炼':'煉','烟':'煙','烦':'煩','烧':'燒','热':'熱','焰':'焰','爷':'爺','牵':'牽',
-  '状':'狀','犹':'猶','狮':'獅','猎':'獵','猪':'豬','猫':'貓','献':'獻','玛':'瑪',
-  '环':'環','现':'現','瑶':'瑤','电':'電','画':'畫','疗':'療','症':'症','盐':'鹽',
-  '监':'監','盖':'蓋','盘':'盤','着':'著','矿':'礦','码':'碼','礼':'禮','祸':'禍',
-  '离':'離','种':'種','称':'稱','积':'積','稳':'穩','窃':'竊','竞':'競','笔':'筆',
-  '笼':'籠','签':'簽','简':'簡','类':'類','粮':'糧','粹':'粹','纠':'糾','红':'紅',
-  '纤':'纖','约':'約','级':'級','纪':'紀','纯':'純','纱':'紗','纲':'綱','纳':'納',
-  '纵':'縱','纷':'紛','纸':'紙','纹':'紋','纺':'紡','纽':'紐','线':'線','练':'練',
-  '组':'組','细':'細','织':'織','终':'終','经':'經','结':'結','绒':'絨','绕':'繞',
-  '绘':'繪','给':'給','络':'絡','绝':'絕','统':'統','继':'繼','绩':'績','绪':'緒',
-  '续':'續','维':'維','绵':'綿','综':'綜','绿':'綠','编':'編','缎':'緞','缓':'緩',
-  '缕':'縷','缘':'緣','缝':'縫','缠':'纏','缤':'繽','缩':'縮','罗':'羅','罚':'罰',
-  '网':'網','翘':'翹','联':'聯','聪':'聰','职':'職','肤':'膚','肠':'腸','脉':'脈',
-  '脏':'髒','脑':'腦','脸':'臉','腾':'騰','节':'節','药':'藥','荡':'蕩','荣':'榮',
-  '莲':'蓮','获':'獲','营':'營','蓝':'藍','蕴':'蘊','虑':'慮','虚':'虛','虫':'蟲',
-  '蛮':'蠻','蜡':'蠟','蝎':'蠍','补':'補','装':'裝','览':'覽','觉':'覺','观':'觀',
-  '规':'規','视':'視','触':'觸','记':'記','讨':'討','让':'讓','讲':'講','论':'論',
-  '设':'設','证':'證','评':'評','识':'識','词':'詞','译':'譯','试':'試','诗':'詩',
-  '话':'話','详':'詳','语':'語','误':'誤','说':'說','请':'請','诸':'諸','诺':'諾',
-  '读':'讀','调':'調','谁':'誰','谈':'談','谋':'謀','谐':'諧','谓':'謂','谜':'謎',
-  '谢':'謝','谨':'謹','负':'負','贝':'貝','财':'財','货':'貨','质':'質','贩':'販',
-  '贪':'貪','贫':'貧','购':'購','贯':'貫','赌':'賭','赋':'賦','赏':'賞','赐':'賜',
-  '赔':'賠','赚':'賺','赛':'賽','赞':'贊','趋':'趨','跃':'躍','转':'轉','轮':'輪',
-  '软':'軟','辅':'輔','辑':'輯','输':'輸','边':'邊','达':'達','迁':'遷','过':'過',
-  '运':'運','还':'還','这':'這','进':'進','远':'遠','违':'違','连':'連','适':'適',
-  '选':'選','递':'遞','遗':'遺','遥':'遙','邻':'鄰','郁':'鬱','酱':'醬','酿':'釀',
-  '释':'釋','钉':'釘','钓':'釣','钝':'鈍','钟':'鐘','钢':'鋼','钥':'鑰','钩':'鉤',
-  '钱':'錢','钳':'鉗','钻':'鑽','铁':'鐵','铃':'鈴','铜':'銅','铝':'鋁','铠':'鎧',
-  '铭':'銘','银':'銀','铸':'鑄','铺':'鋪','链':'鏈','销':'銷','锁':'鎖','锅':'鍋',
-  '锈':'鏽','锋':'鋒','锐':'銳','错':'錯','锡':'錫','锤':'錘','锥':'錐','锦':'錦',
-  '键':'鍵','锭':'錠','锻':'鍛','镇':'鎮','镜':'鏡','闪':'閃','闭':'閉','问':'問',
-  '闲':'閒','间':'間','闷':'悶','阀':'閥','阁':'閣','阅':'閱','阔':'闊','阳':'陽',
-  '阴':'陰','阵':'陣','阶':'階','际':'際','隐':'隱','难':'難','雾':'霧','霜':'霜',
-  '静':'靜','韧':'韌','页':'頁','顶':'頂','项':'項','顺':'順','须':'須','顽':'頑',
-  '顾':'顧','预':'預','领':'領','频':'頻','颗':'顆','题':'題','颜':'顏','额':'額',
-  '风':'風','飞':'飛','饰':'飾','饱':'飽','饵':'餌','馆':'館','驰':'馳','驱':'驅',
-  '驻':'駐','驾':'駕','骑':'騎','骗':'騙','鱼':'魚','鲜':'鮮','鸟':'鳥','鸡':'雞',
-  '鸣':'鳴','鸭':'鴨','鹤':'鶴','鹰':'鷹','鹿':'鹿','麦':'麥','黄':'黃','齐':'齊',
-  '齿':'齒','龙':'龍','龟':'龜',
-};
-
-function s2t(text: string): string {
-  if (!text) return text;
-  let result = '';
-  for (const ch of text) {
-    result += S2T_MAP[ch] || ch;
-  }
-  return result;
-}
-
 // ============================================
 // 主元件
 // ============================================
@@ -268,29 +189,30 @@ export default function MarketScannerPage() {
         setDataCenters(dcs);
         setWorldsMap(wm);
 
-        // 從 localStorage 恢復設定
-        let savedDc = '';
-        let savedWorld = '';
+        // 從共用伺服器設定恢復 DC/World
+        const serverConfig = loadServerConfig();
+        let savedDc = serverConfig.dcName;
+        let savedWorld = serverConfig.worldName;
+
+        // 從掃描器專用設定恢復其他設定
         try {
           const raw = localStorage.getItem('ff14_scanner_settings');
           if (raw) {
             const s = JSON.parse(raw);
-            savedDc = s.dc || '';
-            savedWorld = s.world || '';
             if (s.maxIlvl) setMaxIlvl(Number(s.maxIlvl));
             if (s.regionScope) setRegionScope(s.regionScope);
             if (s.itemIds) setItemIdInput(s.itemIds);
           }
         } catch {}
 
-        // 預設陸行鳥區
+        // 使用共用設定的 DC，若無則預設陸行鳥區
         const defaultDc = savedDc || dcs.find(d => d.region === '繁中服')?.name || dcs[0]?.name || '';
         setSelectedDC(defaultDc);
 
         // 載入分類
         await loadCategoryMeta();
 
-        // 恢復分類選擇
+        // 恢復分類選擇（從掃描器專用設定）
         try {
           const raw = localStorage.getItem('ff14_scanner_settings');
           if (raw) {
@@ -339,19 +261,24 @@ export default function MarketScannerPage() {
   }, [currentDcWorlds, dcLoaded, selectedWorld]);
 
   // ---- 儲存設定到 localStorage ----
+  // DC/World 寫入共用伺服器設定；掃描器專用設定另存
   useEffect(() => {
     if (!dcLoaded) return;
+    // 同步 DC/World 至共用伺服器設定
+    const world = currentDcWorlds.find(w => w.name === selectedWorld);
+    if (selectedDC && selectedWorld && world) {
+      saveServerConfig({ dcName: selectedDC, worldId: world.id, worldName: selectedWorld });
+    }
+    // 掃描器專用設定（不含 DC/World）
     try {
       localStorage.setItem('ff14_scanner_settings', JSON.stringify({
-        dc: selectedDC,
-        world: selectedWorld,
         maxIlvl: String(maxIlvl),
         regionScope,
         itemIds: itemIdInput,
         categories: [...selectedCategories],
       }));
     } catch {}
-  }, [selectedDC, selectedWorld, maxIlvl, regionScope, itemIdInput, selectedCategories, dcLoaded]);
+  }, [selectedDC, selectedWorld, maxIlvl, regionScope, itemIdInput, selectedCategories, dcLoaded, currentDcWorlds]);
 
   // ---- 載入分類 Metadata ----
   async function loadCategoryMeta() {
@@ -515,23 +442,22 @@ export default function MarketScannerPage() {
       setProgress(10);
       setStatusMsg(`已載入 ${marketable.length.toLocaleString()} 個可交易物品`);
 
-      // 從 Cafemaker 取得分類物品
+      // 從 Cafemaker 取得分類物品（並行化，同時跑 3 個分類以提升效能）
       interface ItemInfo { id: number; nameCn: string; nameEn: string; ilvl: number; catId: number; canHq: boolean }
       let allItems: ItemInfo[] = [];
       const catList = [...selectedCategories];
 
       if (catList.length > 0) {
-        for (let ci = 0; ci < catList.length; ci++) {
-          if (abortRef.current) break;
-          const catId = catList[ci];
-          const meta = categoryMeta[catId];
-          const catName = meta ? (meta.nameTw || meta.nameCn) : String(catId);
-          setProgress(10 + Math.round((ci / catList.length) * 30));
-          setStatusMsg(`取得 ${catName} 物品資料...`);
+        const CONCURRENCY = 3; // 同時抓取的分類數
+        let completedCats = 0;
 
+        // 單一分類的抓取邏輯
+        async function fetchCategory(catId: number): Promise<ItemInfo[]> {
+          const items: ItemInfo[] = [];
           try {
             let page = 1;
             while (page <= 20) {
+              if (abortRef.current) break;
               const url = `${CAFE_BASE}/search?indexes=Item&filters=ItemUICategory.ID=${catId},LevelItem<=${maxIlvl}&columns=ID,Name,Name_chs,Name_en,LevelItem,CanBeHq&limit=250&page=${page}`;
               const data: { Results?: Array<{ ID: number; Name?: string; Name_chs?: string; Name_en?: string; LevelItem?: number; CanBeHq?: boolean }>; Pagination?: { PageTotal?: number } } = await fetchJSON(url);
               const pageResults = data.Results || [];
@@ -539,7 +465,7 @@ export default function MarketScannerPage() {
 
               for (const r of pageResults) {
                 if (r.ID && marketableSet.has(r.ID)) {
-                  allItems.push({
+                  items.push({
                     id: r.ID,
                     nameCn: r.Name_chs || r.Name || '',
                     nameEn: r.Name_en || r.Name || '',
@@ -556,7 +482,25 @@ export default function MarketScannerPage() {
           } catch (e) {
             console.warn(`分類 ${catId} 載入失敗:`, e);
           }
+          completedCats++;
+          setProgress(10 + Math.round((completedCats / catList.length) * 30));
+          setStatusMsg(`已完成 ${completedCats}/${catList.length} 個分類...`);
+          return items;
         }
+
+        // 控制並行數的 worker pool
+        const categoryResults: ItemInfo[][] = [];
+        let catIdx = 0;
+        async function catWorker() {
+          while (catIdx < catList.length && !abortRef.current) {
+            const idx = catIdx++;
+            categoryResults[idx] = await fetchCategory(catList[idx]);
+          }
+        }
+        await Promise.all(
+          Array.from({ length: Math.min(CONCURRENCY, catList.length) }, () => catWorker())
+        );
+        allItems = categoryResults.flat();
       }
 
       // 直接指定的物品 ID
@@ -609,18 +553,19 @@ export default function MarketScannerPage() {
         const ids = batch.map(b => b.id).join(',');
 
         try {
+          // 同時發起 main 和 aggregated 查詢（並行化）
           const mainUrl = `${UNI_BASE}/${queryTarget}/${ids}?listings=30&entries=30`;
-          const mainData: Record<string, unknown> = await fetchJSON(mainUrl);
+          const aggUrl = `${UNI_BASE}/aggregated/${queryTarget}/${ids}`;
+          const [mainData, aggResult] = await Promise.all([
+            fetchJSON<Record<string, unknown>>(mainUrl),
+            fetchJSON<{ results?: Array<Record<string, unknown>> }>(aggUrl).catch(() => ({ results: [] })),
+          ]);
 
           // aggregated data
-          const aggUrl = `${UNI_BASE}/aggregated/${queryTarget}/${ids}`;
-          let aggMap: Record<number, Record<string, unknown>> = {};
-          try {
-            const aggData: { results?: Array<Record<string, unknown>> } = await fetchJSON(aggUrl);
-            for (const res of (aggData.results || [])) {
-              aggMap[(res.itemId as number)] = res;
-            }
-          } catch {}
+          const aggMap: Record<number, Record<string, unknown>> = {};
+          for (const res of (aggResult.results || [])) {
+            aggMap[(res.itemId as number)] = res;
+          }
 
           // parse main data
           type MarketItem = Record<string, unknown>;

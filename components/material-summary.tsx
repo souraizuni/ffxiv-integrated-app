@@ -11,10 +11,10 @@ import { getRecipeByItemId } from '@/lib/recipe-datasource';
 import { fetchItem } from '@/hooks/use-xivapi';
 import { ServerSelector, useServerConfig } from './server-selector';
 import {
-  fetchMarketPrices,
   calculateSmartCost,
   type MarketPriceInfo,
 } from '@/hooks/use-universalis';
+import { useMarketPrices } from '@/hooks/use-market-prices';
 
 // ---- 模組層級快取（跨元件生命週期保持） ----
 const materialCache = new Map<string, AggregatedMaterial[]>();
@@ -107,12 +107,9 @@ export function MaterialSummary({ items, listId, onClose }: MaterialSummaryProps
   const [showCostCalculator, setShowCostCalculator] = useState(false);
   const [hasSavedData, setHasSavedData] = useState(false);  // 是否有儲存的資料
 
-  // 市場價格查詢狀態
+  // 市場價格查詢狀態（使用共用 Hook）
   const serverConfig = useServerConfig();
-  const [marketPrices, setMarketPrices] = useState<Map<number, MarketPriceInfo>>(new Map());
-  const [isFetchingPrices, setIsFetchingPrices] = useState(false);
-  const [fetchProgress, setFetchProgress] = useState({ current: 0, total: 0 });
-  const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
+  const { marketPrices, isFetchingPrices, fetchProgress, lastFetchTime, fetchError, fetchPrices, clearError } = useMarketPrices(serverConfig.worldId);
 
   // 計算 cache key（用 useMemo 確保穩定）
   const cacheKey = useMemo(() => generateCacheKey(items), [items]);
@@ -292,51 +289,35 @@ export function MaterialSummary({ items, listId, onClose }: MaterialSummaryProps
 
   // 查詢所有材料的市場價格
   const fetchAllMarketPrices = useCallback(async () => {
-    setIsFetchingPrices(true);
-    setFetchProgress({ current: 0, total: 0 });
+    const itemIds = materials.map((m) => m.itemId);
+    const prices = await fetchPrices(itemIds);
+    if (prices.size === 0) return;
 
-    try {
-      const itemIds = materials.map((m) => m.itemId);
-      const uniqueIds = [...new Set(itemIds)];
-      const prices = await fetchMarketPrices(
-        serverConfig.worldId,
-        uniqueIds,
-        (current, total) => setFetchProgress({ current, total })
-      );
-
-      setMarketPrices(prices);
-      setLastFetchTime(new Date());
-
-      // 自動填入最低價格
-      setCostEntries((prev) => {
-        const newMap = new Map(prev);
-        materials.forEach((m) => {
-          const priceInfo = prices.get(m.itemId);
-          const entry = newMap.get(m.itemId);
-          if (priceInfo && entry) {
-            const minPrice = priceInfo.minPriceNQ;
-            if (priceInfo.listings.length > 0 && m.totalAmount > 0) {
-              const smart = calculateSmartCost(priceInfo.listings, m.totalAmount, false);
-              newMap.set(m.itemId, {
-                ...entry,
-                unitPrice: smart.avgUnitCost > 0 ? smart.avgUnitCost : (minPrice || 0),
-              });
-            } else {
-              newMap.set(m.itemId, {
-                ...entry,
-                unitPrice: minPrice || 0,
-              });
-            }
+    // 自動填入最低價格
+    setCostEntries((prev) => {
+      const newMap = new Map(prev);
+      materials.forEach((m) => {
+        const priceInfo = prices.get(m.itemId);
+        const entry = newMap.get(m.itemId);
+        if (priceInfo && entry) {
+          const minPrice = priceInfo.minPriceNQ;
+          if (priceInfo.listings.length > 0 && m.totalAmount > 0) {
+            const smart = calculateSmartCost(priceInfo.listings, m.totalAmount, false);
+            newMap.set(m.itemId, {
+              ...entry,
+              unitPrice: smart.avgUnitCost > 0 ? smart.avgUnitCost : (minPrice || 0),
+            });
+          } else {
+            newMap.set(m.itemId, {
+              ...entry,
+              unitPrice: minPrice || 0,
+            });
           }
-        });
-        return newMap;
+        }
       });
-    } catch (e) {
-      console.error('查詢市場價格失敗:', e);
-    } finally {
-      setIsFetchingPrices(false);
-    }
-  }, [materials, serverConfig.worldId]);
+      return newMap;
+    });
+  }, [materials, fetchPrices]);
 
   // 切換展開/收合
   const toggleExpand = (itemId: number) => {
@@ -616,6 +597,14 @@ export function MaterialSummary({ items, listId, onClose }: MaterialSummaryProps
                     </span>
                   )}
                 </div>
+
+                {/* 查價錯誤提示 */}
+                {fetchError && (
+                  <div className="flex items-center justify-between p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-300">
+                    <span>⚠️ {fetchError}</span>
+                    <button onClick={clearError} className="text-red-500 hover:text-red-700 dark:hover:text-red-200 ml-2">✕</button>
+                  </div>
+                )}
 
                 {/* 說明 */}
                 <div className="text-sm text-gray-500 bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
