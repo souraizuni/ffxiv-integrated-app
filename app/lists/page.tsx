@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useCraftingLists } from '@/hooks/use-crafting-lists';
 import { MaterialSummary } from '@/components/material-summary';
 import { CopyButton } from '@/components/copy-button';
+import { ServerSelector, useServerConfig } from '@/components/server-selector';
+import { useMarketPrices } from '@/hooks/use-market-prices';
 import { searchRecipes } from '@/lib/recipe-datasource';
 import { fetchItem } from '@/hooks/use-xivapi';
 import type { RecipeInfo } from '@/lib/recipe-datasource';
@@ -24,12 +26,17 @@ export default function RequirementListsPage() {
     updateItemQuantity,
     updateItemCompleted,
     updateItemMarketPrice,
+    batchUpdateMarketPrices,
     clearItems,
   } = useCraftingLists();
 
   const [showNewListForm, setShowNewListForm] = useState(false);
   const [newListName, setNewListName] = useState('');
   const [activeTab, setActiveTab] = useState<'items' | 'materials'>('items');
+
+  // 伺服器設定 & 市場價格查詢
+  const serverConfig = useServerConfig();
+  const { isFetchingPrices, fetchProgress, lastFetchTime, fetchError, fetchPrices, clearError } = useMarketPrices(serverConfig.worldId);
 
   // 搜尋狀態
   const [searchQuery, setSearchQuery] = useState('');
@@ -151,6 +158,33 @@ export default function RequirementListsPage() {
       clearItems(selectedListId);
     }
   };
+
+  // 一鍵查詢裝備市價
+  const handleFetchEquipmentPrices = useCallback(async () => {
+    if (!selectedList || !selectedListId || selectedList.items.length === 0) return;
+
+    const itemIds = selectedList.items.map((item) => item.itemId);
+    const prices = await fetchPrices(itemIds);
+    if (prices.size === 0) return;
+
+    // 收集所有價格後一次批次更新（避免逐筆 saveLists 導致互相覆蓋）
+    const priceUpdates = new Map<number, number>();
+    selectedList.items.forEach((item) => {
+      const priceInfo = prices.get(item.itemId);
+      if (priceInfo) {
+        // 優先取 NQ 最低價；若無 NQ 則取 HQ
+        const price = priceInfo.minPriceNQ > 0
+          ? priceInfo.minPriceNQ
+          : priceInfo.minPriceHQ > 0
+            ? priceInfo.minPriceHQ
+            : undefined;
+        if (price !== undefined) {
+          priceUpdates.set(item.itemId, price);
+        }
+      }
+    });
+    batchUpdateMarketPrices(selectedListId, priceUpdates);
+  }, [selectedList, selectedListId, fetchPrices, batchUpdateMarketPrices]);
 
   // 點擊外部關閉搜尋結果
   useEffect(() => {
@@ -431,6 +465,46 @@ export default function RequirementListsPage() {
                     </div>
                   ) : (
                     <>
+                      {/* 伺服器選擇 & 一鍵查價 */}
+                      <div className="mb-4 space-y-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <ServerSelector
+                            compact
+                            onServerChange={(worldId, worldName, dcName) => {
+                              serverConfig.updateConfig(worldId, worldName, dcName);
+                            }}
+                          />
+                          <button
+                            onClick={handleFetchEquipmentPrices}
+                            disabled={isFetchingPrices || selectedList.items.length === 0}
+                            className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                          >
+                            {isFetchingPrices ? (
+                              <>
+                                <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                查詢中 ({fetchProgress.current}/{fetchProgress.total})
+                              </>
+                            ) : (
+                              <>📊 一鍵查詢裝備市價</>
+                            )}
+                          </button>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                            自動取得 {serverConfig.worldName} 伺服器的最低價並填入
+                          </span>
+                          {lastFetchTime && (
+                            <span className="text-xs text-green-600 dark:text-green-400">
+                              ✅ 上次查詢：{lastFetchTime.toLocaleTimeString()}
+                            </span>
+                          )}
+                        </div>
+                        {fetchError && (
+                          <div className="flex items-center justify-between p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-300">
+                            <span>⚠️ {fetchError}</span>
+                            <button onClick={clearError} className="text-red-500 hover:text-red-700 dark:hover:text-red-200 ml-2">✕</button>
+                          </div>
+                        )}
+                      </div>
+
                       <div className="flex justify-between items-center mb-4">
                         <span className="text-sm text-gray-500">
                           共 {selectedList.items.length} 項裝備

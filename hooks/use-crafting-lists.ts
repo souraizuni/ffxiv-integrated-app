@@ -211,6 +211,25 @@ export function useCraftingLists() {
     saveLists(updated);
   }, [lists, saveLists]);
 
+  // 批次更新市場價格（避免逐筆 saveLists 導致覆蓋）
+  const batchUpdateMarketPrices = useCallback((listId: string, updates: Map<number, number>) => {
+    if (updates.size === 0) return;
+    const updated = lists.map(list => {
+      if (list.id === listId) {
+        const newItems = list.items.map(item => {
+          const price = updates.get(item.itemId);
+          if (price !== undefined) {
+            return { ...item, marketPrice: price };
+          }
+          return item;
+        });
+        return { ...list, items: newItems, updatedAt: new Date().toISOString() };
+      }
+      return list;
+    });
+    saveLists(updated);
+  }, [lists, saveLists]);
+
   // 清空清單物品
   const clearItems = useCallback((listId: string) => {
     const updated = lists.map(list => {
@@ -236,6 +255,7 @@ export function useCraftingLists() {
     updateItemQuantity,
     updateItemCompleted,
     updateItemMarketPrice,
+    batchUpdateMarketPrices,
     clearItems,
     reload: loadLists,
   };
