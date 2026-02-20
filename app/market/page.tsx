@@ -62,6 +62,13 @@ interface ScanResult {
   score: number;
   totalSoldQty: number;
   uniqueBuyers: number;
+  medianPrice: number;
+  totalListings: number;
+  absorptionRate: number;
+  competitionFactor: number;
+  marketValue: number;
+  sellThroughDays: number;
+  marketStatus: '缺貨' | '熱銷' | '普通' | '滞銷';
   listings: ListingInfo[];
   recentHistory: HistoryInfo[];
 }
@@ -84,7 +91,7 @@ interface HistoryInfo {
 }
 
 type ViewMode = 'profitable' | 'bestselling' | 'all';
-type SortKey = 'score' | 'avgPrice' | 'velocity' | 'sellersCount' | 'minListingPrice' | 'boardAvgPrice' | 'totalSoldQty';
+type SortKey = 'score' | 'avgPrice' | 'velocity' | 'sellersCount' | 'minListingPrice' | 'boardAvgPrice' | 'totalSoldQty' | 'absorptionRate' | 'marketValue' | 'totalListings' | 'sellThroughDays' | 'medianPrice';
 
 // ============================================
 // 工具函式
@@ -161,8 +168,9 @@ export default function MarketScannerPage() {
   const [searchFilter, setSearchFilter] = useState('');
   const [enableAdvFilter, setEnableAdvFilter] = useState(false);
   const [fMinPrice, setFMinPrice] = useState(500);
-  const [fMinVelocity, setFMinVelocity] = useState(3);
-  const [fMaxSellers, setFMaxSellers] = useState(20);
+  const [fMinVelocity, setFMinVelocity] = useState(10);
+  const [fMaxSellers, setFMaxSellers] = useState(30);
+  const [fMinAbsorption, setFMinAbsorption] = useState(0.2);
 
   // ---- 展開詳細 ----
   const [expandedDetails, setExpandedDetails] = useState<Set<number>>(new Set());
@@ -379,9 +387,10 @@ export default function MarketScannerPage() {
         if (!match) return false;
       }
       if (enableAdvFilter) {
-        if (r.avgPrice < fMinPrice) return false;
+        if (r.medianPrice < fMinPrice) return false;
         if (r.velocity < fMinVelocity) return false;
         if (r.sellersCount > fMaxSellers) return false;
+        if (r.absorptionRate < fMinAbsorption) return false;
       }
       if (viewMode === 'bestselling' && r.velocity <= 0) return false;
       if (viewMode === 'profitable' && r.score <= 0) return false;
@@ -395,7 +404,7 @@ export default function MarketScannerPage() {
     });
 
     return filtered;
-  }, [results, searchFilter, enableAdvFilter, fMinPrice, fMinVelocity, fMaxSellers, viewMode, sortKey, sortAsc]);
+  }, [results, searchFilter, enableAdvFilter, fMinPrice, fMinVelocity, fMaxSellers, fMinAbsorption, viewMode, sortKey, sortAsc]);
 
   const maxScore = useMemo(() => Math.max(...filteredResults.map(r => r.score), 1), [filteredResults]);
   const displayResults = useMemo(() => filteredResults.slice(0, 200), [filteredResults]);
@@ -586,6 +595,7 @@ export default function MarketScannerPage() {
             const rawListings = (m && Array.isArray((m as { listings?: unknown[] }).listings))
               ? (m as { listings: Record<string, unknown>[] }).listings : [];
             const sellersCount = new Set(rawListings.map(l => (l.retainerName as string) || (l.sellerID as string) || '')).size;
+            const totalListings = (m as { listingsCount?: number })?.listingsCount || rawListings.length;
 
             // Velocity
             const scopeKey = regionScope === 'dc' ? 'dc' : 'world';
@@ -631,7 +641,20 @@ export default function MarketScannerPage() {
             const totalSoldQty = recentHistory.reduce((sum, h) => sum + ((h.quantity as number) || 1), 0);
             const uniqueBuyers = new Set(recentHistory.map(h => (h.buyerName as string) || '')).size;
 
-            const score = Math.round((velocity * avgPrice) / (sellersCount + 1));
+            // 中位價（從成交紀錄計算，fallback 均價）
+            const historyPrices = recentHistory.map(h => (h.pricePerUnit as number)).filter(p => p > 0);
+            const medianPrice = historyPrices.length > 0 ? median(historyPrices) : avgPrice;
+
+            // 新評分模型指標
+            const absorptionRate = velocity / (totalListings + 1);
+            const competitionFactor = 1 / Math.log(sellersCount + 2);
+            const marketValue = Math.round(velocity * medianPrice);
+            const sellThroughDays = totalListings / (velocity + 1);
+            const marketStatus: '缺貨' | '熱銷' | '普通' | '滞銷' =
+              absorptionRate > 1 ? '缺貨' : absorptionRate >= 0.3 ? '熱銷' : absorptionRate >= 0.1 ? '普通' : '滞銷';
+
+            // 綜合評分 = 中位價 × 日銷量 × 吸收率 × 競爭修正
+            const score = Math.round(medianPrice * velocity * absorptionRate * competitionFactor);
 
             // 嘗試繁中翻譯
             const twName = getItemNameTw(meta.id);
@@ -651,6 +674,13 @@ export default function MarketScannerPage() {
               score,
               totalSoldQty,
               uniqueBuyers,
+              medianPrice,
+              totalListings,
+              absorptionRate,
+              competitionFactor,
+              marketValue,
+              sellThroughDays,
+              marketStatus,
               listings: rawListings
                 .map(l => ({
                   pricePerUnit: (l.pricePerUnit as number) || 0,
@@ -697,7 +727,7 @@ export default function MarketScannerPage() {
         setSortAsc(a => !a);
         return key;
       }
-      setSortAsc(key === 'sellersCount');
+      setSortAsc(key === 'sellersCount' || key === 'totalListings' || key === 'sellThroughDays');
       return key;
     });
   }, []);
@@ -725,7 +755,7 @@ export default function MarketScannerPage() {
             市場掃描器
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Market Profitability Scanner · 綜合分數 = 日銷量 × 均價 ÷ (賣家數+1)
+            Market Profitability Scanner · 綜合分數 = 中位價 × 日銷量 × 吸收率 × 競爭修正
           </p>
         </div>
       </div>
@@ -969,8 +999,9 @@ export default function MarketScannerPage() {
             <div className="flex gap-1">
               {[
                 { key: 'score' as SortKey, label: '📊 分數' },
-                { key: 'avgPrice' as SortKey, label: '💰 價格' },
+                { key: 'absorptionRate' as SortKey, label: '📈 吸收率' },
                 { key: 'velocity' as SortKey, label: '🔥 銷量' },
+                { key: 'marketValue' as SortKey, label: '💰 市場規模' },
                 { key: 'sellersCount' as SortKey, label: '👥 賣家數' },
               ].map(chip => (
                 <button
@@ -1002,7 +1033,7 @@ export default function MarketScannerPage() {
           {enableAdvFilter && (
             <div className="flex flex-wrap gap-4 items-center text-sm text-gray-600 dark:text-gray-400">
               <label className="flex items-center gap-2">
-                最低均價
+                最低中位價
                 <input type="number" value={fMinPrice} min={0} step={100} onChange={e => setFMinPrice(parseInt(e.target.value) || 0)}
                   className="w-20 px-2 py-1 text-sm border rounded dark:bg-gray-800 dark:border-gray-600" />
               </label>
@@ -1012,8 +1043,13 @@ export default function MarketScannerPage() {
                   className="w-20 px-2 py-1 text-sm border rounded dark:bg-gray-800 dark:border-gray-600" />
               </label>
               <label className="flex items-center gap-2">
+                最低吸收率
+                <input type="number" value={fMinAbsorption} min={0} max={10} step={0.05} onChange={e => setFMinAbsorption(parseFloat(e.target.value) || 0)}
+                  className="w-24 px-2 py-1 text-sm border rounded dark:bg-gray-800 dark:border-gray-600" />
+              </label>
+              <label className="flex items-center gap-2">
                 最多賣家數
-                <input type="number" value={fMaxSellers} min={1} onChange={e => setFMaxSellers(parseInt(e.target.value) || 20)}
+                <input type="number" value={fMaxSellers} min={1} onChange={e => setFMaxSellers(parseInt(e.target.value) || 30)}
                   className="w-20 px-2 py-1 text-sm border rounded dark:bg-gray-800 dark:border-gray-600" />
               </label>
             </div>
@@ -1035,25 +1071,32 @@ export default function MarketScannerPage() {
                       <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 dark:text-gray-400">物品名稱</th>
                       <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer hover:text-blue-500"
                         onClick={() => handleSort('minListingPrice')}>
-                        看板最低價 {sortKey === 'minListingPrice' ? (sortAsc ? '▲' : '▼') : '⇅'}
+                        最低掛價 {sortKey === 'minListingPrice' ? (sortAsc ? '▲' : '▼') : '⇅'}
                       </th>
                       <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer hover:text-blue-500"
-                        onClick={() => handleSort('boardAvgPrice')}>
-                        看板均價 {sortKey === 'boardAvgPrice' ? (sortAsc ? '▲' : '▼') : '⇅'}
+                        onClick={() => handleSort('medianPrice')}>
+                        中位價 {sortKey === 'medianPrice' ? (sortAsc ? '▲' : '▼') : '⇅'}
                       </th>
                       <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer hover:text-blue-500"
                         onClick={() => handleSort('velocity')}>
                         日銷量 {sortKey === 'velocity' ? (sortAsc ? '▲' : '▼') : '⇅'}
                       </th>
                       <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer hover:text-blue-500"
-                        onClick={() => handleSort('totalSoldQty')}>
-                        已售出 {sortKey === 'totalSoldQty' ? (sortAsc ? '▲' : '▼') : '⇅'}
+                        onClick={() => handleSort('totalListings')}>
+                        掛單數 {sortKey === 'totalListings' ? (sortAsc ? '▲' : '▼') : '⇅'}
+                      </th>
+                      <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer hover:text-blue-500"
+                        onClick={() => handleSort('absorptionRate')}>
+                        吸收率 {sortKey === 'absorptionRate' ? (sortAsc ? '▲' : '▼') : '⇅'}
+                      </th>
+                      <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer hover:text-blue-500"
+                        onClick={() => handleSort('sellThroughDays')}>
+                        售完天數 {sortKey === 'sellThroughDays' ? (sortAsc ? '▲' : '▼') : '⇅'}
                       </th>
                       <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer hover:text-blue-500"
                         onClick={() => handleSort('sellersCount')}>
                         賣家數 {sortKey === 'sellersCount' ? (sortAsc ? '▲' : '▼') : '⇅'}
                       </th>
-                      <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 dark:text-gray-400">預估日收入</th>
                       <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer hover:text-blue-500"
                         onClick={() => handleSort('score')}>
                         綜合分數 {sortKey === 'score' ? (sortAsc ? '▲' : '▼') : '⇅'}
@@ -1087,7 +1130,9 @@ export default function MarketScannerPage() {
               </div>
               <p className="text-xs text-gray-400">
                 顯示 {displayResults.length}{filteredResults.length > 200 ? ` / ${filteredResults.length}` : ''} 筆結果
-                · 綜合分數 = 日銷量 × 均價 ÷ (賣家數 + 1)
+                · 綜合分數 = 中位價 × 日銷量 × 吸收率 × 競爭修正
+                · 吸收率 = 日銷量 ÷ (掛單數+1)
+                · 競爭修正 = 1 ÷ ln(賣家數+2)
                 · 資料來源：<a href="https://universalis.app" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">Universalis</a>
               </p>
             </>
@@ -1136,12 +1181,15 @@ function ResultRow({
   onToggleExpand: () => void;
   onDetailCountChange: (n: number) => void;
 }) {
-  const scorePct = Math.round((r.score / maxScore) * 100);
-  const maxVel = maxScore; // approximate
-  const isHot = r.velocity > 5;
-  const isSafe = r.sellersCount <= 5 && r.velocity >= 3;
-  const isProfit = r.score > maxScore * 0.3 && r.score > 0;
-  const revenue = Math.round(r.velocity * r.avgPrice);
+  const scorePct = maxScore > 0 ? Math.round((r.score / maxScore) * 100) : 0;
+
+  const statusStyle: Record<string, string> = {
+    '缺貨': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border border-red-300 dark:border-red-700',
+    '熱銷': 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 border border-orange-300 dark:border-orange-700',
+    '普通': 'bg-gray-100 text-gray-600 dark:bg-gray-700/50 dark:text-gray-400 border border-gray-300 dark:border-gray-600',
+    '滯銷': 'bg-slate-100 text-slate-500 dark:bg-slate-800/50 dark:text-slate-500 border border-slate-300 dark:border-slate-700',
+  };
+  const statusIcon: Record<string, string> = { '缺貨': '🚨', '熱銷': '🔥', '普通': '➖', '滯銷': '🐌' };
 
   return (
     <>
@@ -1150,9 +1198,9 @@ function ResultRow({
         <td className="px-3 py-2">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium text-gray-800 dark:text-gray-200">{r.nameTw}</span>
-            {isHot && <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 border border-yellow-300 dark:border-yellow-700">🔥 熱賣</span>}
-            {isSafe && <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border border-green-300 dark:border-green-700">✓ 低競爭</span>}
-            {isProfit && <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border border-blue-300 dark:border-blue-700">💎 高利潤</span>}
+            <span className={`px-1.5 py-0.5 text-[10px] rounded-full ${statusStyle[r.marketStatus]}`}>
+              {statusIcon[r.marketStatus]} {r.marketStatus}
+            </span>
           </div>
           <div className="text-xs text-gray-400 mt-0.5">
             {r.nameEn && <>{r.nameEn} · </>}iLv {r.ilvl}{r.canHq ? ' · 可 HQ' : ''}
@@ -1165,21 +1213,26 @@ function ResultRow({
           {r.minListingPrice > 0 ? fmtGil(r.minListingPrice) : <span className="text-gray-400">—</span>}
         </td>
         <td className="px-3 py-2 text-right font-semibold text-yellow-600 dark:text-yellow-400">
-          {fmtGil(r.boardAvgPrice)}
+          {fmtGil(r.medianPrice)}
         </td>
         <td className="px-3 py-2 text-right text-blue-600 dark:text-blue-400">
           {r.velocity.toFixed(1)} <span className="text-gray-400 text-xs">/ 日</span>
         </td>
         <td className="px-3 py-2 text-right text-gray-500">
-          {r.totalSoldQty} 個 <span className="text-xs">({r.uniqueBuyers}人)</span>
+          {r.totalListings}
+        </td>
+        <td className="px-3 py-2 text-right">
+          <span className={`font-medium ${r.absorptionRate >= 0.3 ? 'text-green-600 dark:text-green-400' : r.absorptionRate >= 0.1 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-500'}`}>
+            {r.absorptionRate.toFixed(2)}
+          </span>
+        </td>
+        <td className="px-3 py-2 text-right text-gray-500">
+          {r.sellThroughDays < 999 ? r.sellThroughDays.toFixed(1) : '—'} <span className="text-gray-400 text-xs">天</span>
         </td>
         <td className="px-3 py-2 text-right">
           <span className={`font-medium ${r.sellersCount <= 5 ? 'text-green-600 dark:text-green-400' : r.sellersCount <= 15 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-500'}`}>
             {r.sellersCount}
           </span>
-        </td>
-        <td className="px-3 py-2 text-right text-green-600 dark:text-green-400 text-xs font-medium">
-          {fmtGil(revenue)}
         </td>
         <td className="px-3 py-2 text-right">
           <div className="flex items-center justify-end gap-2">
@@ -1192,7 +1245,7 @@ function ResultRow({
       </tr>
       {isExpanded && (
         <tr>
-          <td colSpan={9} className="px-4 py-3 bg-gray-50 dark:bg-gray-800/50">
+          <td colSpan={10} className="px-4 py-3 bg-gray-50 dark:bg-gray-800/50">
             <div className="mb-2 flex items-center gap-3 text-xs text-gray-500">
               <span>顯示筆數：</span>
               <input
