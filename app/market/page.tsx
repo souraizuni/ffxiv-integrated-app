@@ -67,6 +67,7 @@ interface ScanResult {
   marketValue: number;
   sellThroughDays: number;
   marketStatus: '缺貨' | '熱銷' | '普通' | '滯銷';
+  lastUploadTime: number;
   listings: ListingInfo[];
   recentHistory: HistoryInfo[];
 }
@@ -651,6 +652,9 @@ export default function MarketScannerPage() {
             const marketStatus: '缺貨' | '熱銷' | '普通' | '滯銷' =
               sellThroughDays < 1 ? '缺貨' : sellThroughDays < 5 ? '熱銷' : sellThroughDays < 30 ? '普通' : '滯銷';
 
+            // 資料更新時間（毫秒時間戳）
+            const lastUploadTime = (m as { lastUploadTime?: number })?.lastUploadTime || 0;
+
             // 綜合評分 = 中位價 × 日銷量 × 吸收率 × 競爭修正
             const score = Math.round(medianPrice * velocity * absorptionRate * competitionFactor);
 
@@ -679,6 +683,7 @@ export default function MarketScannerPage() {
               marketValue,
               sellThroughDays,
               marketStatus,
+              lastUploadTime,
               listings: rawListings
                 .map(l => ({
                   pricePerUnit: (l.pricePerUnit as number) || 0,
@@ -1205,6 +1210,11 @@ function ResultRow({
           </div>
           <div className="text-xs text-gray-400 mt-0.5">
             {r.nameEn && <>{r.nameEn} · </>}iLv {r.ilvl}{r.canHq ? ' · 可 HQ' : ''}
+            {r.lastUploadTime > 0 && (
+              <span className={`ml-1 ${Date.now() - r.lastUploadTime > 7 * 86400000 ? 'text-red-400' : Date.now() - r.lastUploadTime > 3 * 86400000 ? 'text-yellow-500' : 'text-gray-400'}`}>
+                · 更新 {timeAgo(r.lastUploadTime)}
+              </span>
+            )}
             <button onClick={onToggleExpand} className="ml-2 text-blue-500 hover:underline">
               {isExpanded ? '收起' : '展開看板'}
             </button>
