@@ -8,10 +8,8 @@ import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import {
   fetchDataCentersAndWorlds,
   type DataCenter,
-  type World,
   loadServerConfig,
   saveServerConfig,
-  DEFAULT_SERVER_CONFIG,
 } from '@/hooks/use-universalis';
 import { getItemNameTw, s2t } from '@/lib/i18n/tw-translation';
 
@@ -91,7 +89,7 @@ interface HistoryInfo {
 }
 
 type ViewMode = 'profitable' | 'bestselling' | 'all';
-type SortKey = 'score' | 'avgPrice' | 'velocity' | 'sellersCount' | 'minListingPrice' | 'boardAvgPrice' | 'totalSoldQty' | 'absorptionRate' | 'marketValue' | 'totalListings' | 'sellThroughDays' | 'medianPrice';
+type SortKey = 'score' | 'velocity' | 'sellersCount' | 'minListingPrice' | 'absorptionRate' | 'marketValue' | 'totalListings' | 'sellThroughDays' | 'medianPrice';
 
 // ============================================
 // 工具函式
@@ -199,19 +197,21 @@ export default function MarketScannerPage() {
 
         // 從共用伺服器設定恢復 DC/World
         const serverConfig = loadServerConfig();
-        let savedDc = serverConfig.dcName;
-        let savedWorld = serverConfig.worldName;
+        const savedDc = serverConfig.dcName;
+        const savedWorld = serverConfig.worldName;
 
-        // 從掃描器專用設定恢復其他設定
+        // 從掃描器專用設定恢復
+        let scannerSettings: { maxIlvl?: string; regionScope?: string; itemIds?: string; categories?: number[] } | null = null;
         try {
           const raw = localStorage.getItem('ff14_scanner_settings');
-          if (raw) {
-            const s = JSON.parse(raw);
-            if (s.maxIlvl) setMaxIlvl(Number(s.maxIlvl));
-            if (s.regionScope) setRegionScope(s.regionScope);
-            if (s.itemIds) setItemIdInput(s.itemIds);
-          }
+          if (raw) scannerSettings = JSON.parse(raw);
         } catch {}
+
+        if (scannerSettings) {
+          if (scannerSettings.maxIlvl) setMaxIlvl(Number(scannerSettings.maxIlvl));
+          if (scannerSettings.regionScope) setRegionScope(scannerSettings.regionScope as 'world' | 'dc');
+          if (scannerSettings.itemIds) setItemIdInput(scannerSettings.itemIds);
+        }
 
         // 使用共用設定的 DC，若無則預設陸行鳥區
         const defaultDc = savedDc || dcs.find(d => d.region === '繁中服')?.name || dcs[0]?.name || '';
@@ -220,25 +220,10 @@ export default function MarketScannerPage() {
         // 載入分類
         await loadCategoryMeta();
 
-        // 恢復分類選擇（從掃描器專用設定）
-        try {
-          const raw = localStorage.getItem('ff14_scanner_settings');
-          if (raw) {
-            const s = JSON.parse(raw);
-            if (s.categories && Array.isArray(s.categories)) {
-              setSelectedCategories(new Set(s.categories.map(Number)));
-            } else {
-              // 預設分類
-              const defaults = new Set<number>();
-              CATEGORY_GROUPS.filter(g => g.defaultOn).forEach(g => g.ids.forEach(id => defaults.add(id)));
-              setSelectedCategories(defaults);
-            }
-          } else {
-            const defaults = new Set<number>();
-            CATEGORY_GROUPS.filter(g => g.defaultOn).forEach(g => g.ids.forEach(id => defaults.add(id)));
-            setSelectedCategories(defaults);
-          }
-        } catch {
+        // 恢復分類選擇
+        if (scannerSettings?.categories && Array.isArray(scannerSettings.categories)) {
+          setSelectedCategories(new Set(scannerSettings.categories.map(Number)));
+        } else {
           const defaults = new Set<number>();
           CATEGORY_GROUPS.filter(g => g.defaultOn).forEach(g => g.ids.forEach(id => defaults.add(id)));
           setSelectedCategories(defaults);
@@ -722,7 +707,7 @@ export default function MarketScannerPage() {
     } finally {
       setIsScanning(false);
     }
-  }, [selectedDC, selectedWorld, regionScope, selectedCategories, itemIdInput, maxIlvl, categoryMeta]);
+  }, [selectedDC, selectedWorld, regionScope, selectedCategories, itemIdInput, maxIlvl]);
 
   // ---- 排序切換 ----
   const handleSort = useCallback((key: SortKey) => {
@@ -1168,6 +1153,15 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+// 市場狀態標籤樣式（模組級常數，避免每次渲染重建）
+const MARKET_STATUS_STYLE: Record<string, string> = {
+  '缺貨': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border border-red-300 dark:border-red-700',
+  '熱銷': 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 border border-orange-300 dark:border-orange-700',
+  '普通': 'bg-gray-100 text-gray-600 dark:bg-gray-700/50 dark:text-gray-400 border border-gray-300 dark:border-gray-600',
+  '滯銷': 'bg-slate-100 text-slate-500 dark:bg-slate-800/50 dark:text-slate-500 border border-slate-300 dark:border-slate-700',
+};
+const MARKET_STATUS_ICON: Record<string, string> = { '缺貨': '🚨', '熱銷': '🔥', '普通': '➖', '滯銷': '🐌' };
+
 function ResultRow({
   index,
   result: r,
@@ -1187,14 +1181,6 @@ function ResultRow({
 }) {
   const scorePct = maxScore > 0 ? Math.round((r.score / maxScore) * 100) : 0;
 
-  const statusStyle: Record<string, string> = {
-    '缺貨': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border border-red-300 dark:border-red-700',
-    '熱銷': 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 border border-orange-300 dark:border-orange-700',
-    '普通': 'bg-gray-100 text-gray-600 dark:bg-gray-700/50 dark:text-gray-400 border border-gray-300 dark:border-gray-600',
-    '滯銷': 'bg-slate-100 text-slate-500 dark:bg-slate-800/50 dark:text-slate-500 border border-slate-300 dark:border-slate-700',
-  };
-  const statusIcon: Record<string, string> = { '缺貨': '🚨', '熱銷': '🔥', '普通': '➖', '滯銷': '🐌' };
-
   return (
     <>
       <tr className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
@@ -1202,8 +1188,8 @@ function ResultRow({
         <td className="px-3 py-2">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium text-gray-800 dark:text-gray-200">{r.nameTw}</span>
-            <span className={`px-1.5 py-0.5 text-[10px] rounded-full ${statusStyle[r.marketStatus]}`}>
-              {statusIcon[r.marketStatus]} {r.marketStatus}
+            <span className={`px-1.5 py-0.5 text-[10px] rounded-full ${MARKET_STATUS_STYLE[r.marketStatus]}`}>
+              {MARKET_STATUS_ICON[r.marketStatus]} {r.marketStatus}
             </span>
           </div>
           <div className="text-xs text-gray-400 mt-0.5">
