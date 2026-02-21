@@ -68,7 +68,7 @@ interface ScanResult {
   competitionFactor: number;
   marketValue: number;
   sellThroughDays: number;
-  marketStatus: '缺貨' | '熱銷' | '普通' | '滞銷';
+  marketStatus: '缺貨' | '熱銷' | '普通' | '滯銷';
   listings: ListingInfo[];
   recentHistory: HistoryInfo[];
 }
@@ -595,7 +595,11 @@ export default function MarketScannerPage() {
             const rawListings = (m && Array.isArray((m as { listings?: unknown[] }).listings))
               ? (m as { listings: Record<string, unknown>[] }).listings : [];
             const sellersCount = new Set(rawListings.map(l => (l.retainerName as string) || (l.sellerID as string) || '')).size;
-            const totalListings = (m as { listingsCount?: number })?.listingsCount || rawListings.length;
+            // 從 stackSizeHistogram 計算真正的掛單數量（listingsCount 僅反映 API 回傳筆數，受 ?listings= 截斷）
+            const stackHist = (m as { stackSizeHistogram?: Record<string, number> })?.stackSizeHistogram;
+            const totalListings = stackHist
+              ? Object.values(stackHist).reduce((sum, count) => sum + count, 0)
+              : rawListings.length;
 
             // Velocity
             const scopeKey = regionScope === 'dc' ? 'dc' : 'world';
@@ -650,8 +654,8 @@ export default function MarketScannerPage() {
             const competitionFactor = 1 / Math.log(sellersCount + 2);
             const marketValue = Math.round(velocity * medianPrice);
             const sellThroughDays = totalListings / (velocity + 1);
-            const marketStatus: '缺貨' | '熱銷' | '普通' | '滞銷' =
-              absorptionRate > 1 ? '缺貨' : absorptionRate >= 0.3 ? '熱銷' : absorptionRate >= 0.1 ? '普通' : '滞銷';
+            const marketStatus: '缺貨' | '熱銷' | '普通' | '滯銷' =
+              absorptionRate > 1 ? '缺貨' : absorptionRate >= 0.3 ? '熱銷' : absorptionRate >= 0.1 ? '普通' : '滯銷';
 
             // 綜合評分 = 中位價 × 日銷量 × 吸收率 × 競爭修正
             const score = Math.round(medianPrice * velocity * absorptionRate * competitionFactor);
