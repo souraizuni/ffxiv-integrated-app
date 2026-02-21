@@ -585,6 +585,13 @@ export default function MarketScannerPage() {
             const totalListings = stackHist
               ? Object.values(stackHist).reduce((sum, count) => sum + count, 0)
               : rawListings.length;
+            // unitsForSale = 市場板上的實際商品總數量（件），優先使用 API 回傳值，fallback 從 histogram 計算
+            const apiUnitsForSale = (m as { unitsForSale?: number })?.unitsForSale;
+            const unitsForSale = apiUnitsForSale && apiUnitsForSale > 0
+              ? apiUnitsForSale
+              : stackHist
+                ? Object.entries(stackHist).reduce((sum, [qty, count]) => sum + Number(qty) * count, 0)
+                : rawListings.reduce((sum, l) => sum + ((l.quantity as number) || 1), 0);
 
             // Velocity
             const scopeKey = regionScope === 'dc' ? 'dc' : 'world';
@@ -638,9 +645,11 @@ export default function MarketScannerPage() {
             const absorptionRate = velocity / (totalListings + 1);
             const competitionFactor = 1 / Math.log(sellersCount + 2);
             const marketValue = Math.round(velocity * medianPrice);
-            const sellThroughDays = totalListings / (velocity + 1);
+            // sellThroughDays = 實際商品總量 ÷ 日銷量，單位正確（件 ÷ 件/天 = 天）
+            const sellThroughDays = velocity > 0.01 ? unitsForSale / velocity : 9999;
+            // 市場狀態基於「售完天數」判斷，比 absorptionRate 更直觀且單位一致
             const marketStatus: '缺貨' | '熱銷' | '普通' | '滯銷' =
-              absorptionRate > 1 ? '缺貨' : absorptionRate >= 0.3 ? '熱銷' : absorptionRate >= 0.1 ? '普通' : '滯銷';
+              sellThroughDays < 1 ? '缺貨' : sellThroughDays < 5 ? '熱銷' : sellThroughDays < 30 ? '普通' : '滯銷';
 
             // 綜合評分 = 中位價 × 日銷量 × 吸收率 × 競爭修正
             const score = Math.round(medianPrice * velocity * absorptionRate * competitionFactor);
@@ -1121,7 +1130,9 @@ export default function MarketScannerPage() {
                 顯示 {displayResults.length}{filteredResults.length > 200 ? ` / ${filteredResults.length}` : ''} 筆結果
                 · 綜合分數 = 中位價 × 日銷量 × 吸收率 × 競爭修正
                 · 吸收率 = 日銷量 ÷ (掛單數+1)
+                · 售完天數 = 在售數量 ÷ 日銷量
                 · 競爭修正 = 1 ÷ ln(賣家數+2)
+                · 市場狀態依售完天數：&lt;1天=缺貨 / &lt;5天=熱銷 / &lt;30天=普通 / ≥30天=滯銷
                 · 資料來源：<a href="https://universalis.app" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">Universalis</a>
               </p>
             </>
@@ -1217,7 +1228,7 @@ function ResultRow({
           </span>
         </td>
         <td className="px-3 py-2 text-right text-gray-500">
-          {r.sellThroughDays < 999 ? r.sellThroughDays.toFixed(1) : '—'} <span className="text-gray-400 text-xs">天</span>
+          {r.sellThroughDays < 9998 ? r.sellThroughDays.toFixed(1) : '—'} <span className="text-gray-400 text-xs">天</span>
         </td>
         <td className="px-3 py-2 text-right">
           <span className={`font-medium ${r.sellersCount <= 5 ? 'text-green-600 dark:text-green-400' : r.sellersCount <= 15 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-500'}`}>
