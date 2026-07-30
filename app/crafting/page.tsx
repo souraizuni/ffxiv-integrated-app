@@ -5,9 +5,10 @@ import { RecipePanel, MaterialTree, MaterialCostCalculator } from '@/components'
 import { ItemSourceBadges, ItemSourceInfoPanel } from '@/components/item-source-info';
 import { CraftingSimulator } from '@/components/crafting-simulator';
 import { fetchRecipe } from '@/hooks/use-xivapi';
+import { getItem } from '@/lib/data/items';
 import { buildMaterialTree, flattenMaterialTree } from '@/lib/recipe-tree';
 import { useGearsets, JOB_NAMES } from '@/hooks/use-gearsets';
-import { convertToRecipe, getItemInfo, getRecipeByItemId, type RecipeInfo } from '@/lib/recipe-datasource';
+import { convertToRecipe, getRecipeByItemId, type RecipeInfo } from '@/lib/recipe-datasource';
 import type { MaterialTreeNode, CrafterStats, Recipe, CraftJob, FlattenedMaterial } from '@/types';
 
 // 預設製作者屬性
@@ -19,9 +20,6 @@ const defaultCrafterStats: CrafterStats = {
   cp: 687,
   specialist: false,
 };
-
-// CAFEMAKER 圖標 URL
-const CAFEMAKER_BASE = 'https://cafemaker.wakingsands.com';
 
 export default function CraftingPage() {
   // 選擇的配方資訊（來自 yyyy.games API）
@@ -121,14 +119,16 @@ export default function CraftingPage() {
       }
 
       // 取得物品詳細資訊（圖示）
-      const itemInfo = await getItemInfo(itemId).catch(() => null);
-      if (itemInfo) {
+      // 圖示必須用 icon id 而非 item id 組路徑 —— 全庫 50,774 筆物品中，
+      // iconId 恰好等於 itemId 的是 0 筆，先前的寫法等於每個物品都顯示錯誤圖示。
+      const localItem = await getItem(itemId);
+      if (localItem) {
         setSelectedItem((prev) =>
           prev
             ? {
                 ...prev,
-                name: itemInfo.name || prev.name,
-                iconUrl: `${CAFEMAKER_BASE}/i/${Math.floor(itemInfo.id / 1000) * 1000}/${String(itemInfo.id).padStart(6, '0')}.png`,
+                name: localItem.name || prev.name,
+                iconUrl: localItem.iconUrl,
               }
             : null
         );
@@ -153,10 +153,10 @@ export default function CraftingPage() {
     });
     
     try {
-      // 並行執行：轉換配方和獲取物品詳細資訊
-      const [fullRecipe, itemInfo] = await Promise.all([
+      // 並行執行：轉換配方和獲取物品詳細資訊（含正確的圖示）
+      const [fullRecipe, localItem] = await Promise.all([
         convertToRecipe(recipeInfo),
-        getItemInfo(recipeInfo.item_id).catch(() => null),
+        getItem(recipeInfo.item_id).catch(() => null),
       ]);
       
       setRecipe(fullRecipe);
@@ -171,11 +171,8 @@ export default function CraftingPage() {
       }
       
       // 更新物品圖標（如果有）
-      if (itemInfo) {
-        setSelectedItem(prev => prev ? {
-          ...prev,
-          iconUrl: `${CAFEMAKER_BASE}/i/${Math.floor(itemInfo.id / 1000) * 1000}/${String(itemInfo.id).padStart(6, '0')}.png`,
-        } : null);
+      if (localItem) {
+        setSelectedItem(prev => prev ? { ...prev, iconUrl: localItem.iconUrl } : null);
       }
     } catch (error) {
       console.error('Failed to convert recipe:', error);
@@ -217,7 +214,7 @@ export default function CraftingPage() {
         setSelectedItem({
           id: itemId,
           name: itemName || `物品 ${itemId}`,
-          iconUrl: `${CAFEMAKER_BASE}/i/${Math.floor(itemId / 1000) * 1000}/${String(itemId).padStart(6, '0')}.png`,
+          iconUrl: (await getItem(itemId))?.iconUrl || '',
         });
         setCurrentJob(itemRecipe.craftType);
       }

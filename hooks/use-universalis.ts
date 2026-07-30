@@ -3,6 +3,8 @@
 // ============================================
 
 import useSWR from 'swr';
+import { fetchWithStatus } from '@/lib/net/request-manager';
+import { universalisRequests } from '@/lib/net/universalis-requests';
 import type { MarketData, MarketListing, MarketHistoryEntry } from '@/types';
 
 const UNIVERSALIS_BASE = 'https://universalis.app/api/v2';
@@ -108,6 +110,12 @@ export interface MarketPriceInfo {
  * @param itemIds 要查詢的物品 ID 陣列
  * @param onProgress 進度回呼
  */
+/** Universalis 批次查詢回應：單一物品是扁平結構，多物品則巢狀在 items 下 */
+interface UniversalisBatchResponse {
+  itemID?: number;
+  items?: Record<string, Record<string, unknown>>;
+}
+
 export async function fetchMarketPrices(
   worldOrDC: string | number,
   itemIds: number[],
@@ -132,14 +140,14 @@ export async function fetchMarketPrices(
     const url = `${UNIVERSALIS_BASE}/${worldOrDC}/${idsString}?listings=20&entries=10`;
 
     try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
+      const data = (await universalisRequests.request((signal) =>
+        fetchWithStatus(url, signal)
+      )) as UniversalisBatchResponse;
 
       if (batch.length === 1) {
         // 單一物品回應（扁平結構）
         if (data.itemID) {
-          result.set(data.itemID, parseMarketPriceInfo(data));
+          result.set(data.itemID, parseMarketPriceInfo(data as Record<string, unknown>));
         }
       } else {
         // 多物品回應（巢狀在 items 中）
@@ -233,12 +241,9 @@ export function calculateSmartCost(
 
 // ---- Fetcher 函式 ----
 async function fetcher<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Universalis 請求失敗: ${res.status}`);
-  }
-  return res.json();
+  return universalisRequests.request((signal) => fetchWithStatus(url, signal)) as Promise<T>;
 }
+
 
 // ---- 取得單一物品市場資料 ----
 export function useMarketData(
@@ -469,3 +474,107 @@ interface WorldsResponse extends Array<{
   id: number;
   name: string;
 }> {}
+
+// ============================================
+// 單一物品行情（搜尋→詳情用）
+// ============================================
+// 掃描器是「批次找商機」，這一組是「查單一物品」：
+// 不必先跑一次全分類掃描就能看某個物品的在售與成交走勢。
+
+export interface ItemSaleEntry {
+  pricePerUnit: number;
+  quantity: number;
+  total: number;
+  hq: boolean;
+  buyerName: string;
+  worldName: string;
+  /** Universalis 的成交時間為秒 */
+  timestamp: number;
+}
+
+export interface ItemMarketBoard {
+  itemId: number;
+  listings: MarketPriceInfo['listings'];
+  minPriceNQ: number;
+  minPriceHQ: number;
+  averagePriceNQ: number;
+  averagePriceHQ: number;
+  /** 日均成交量 */
+  saleVelocity: number;
+  /** 毫秒 */
+  lastUploadTime: number;
+}
+
+interface RawBoardResponse {
+  itemID?: number;
+  listings?: Array<Record<string, unknown>>;
+  minPriceNQ?: number;
+  minPriceHQ?: number;
+  averagePriceNQ?: number;
+  averagePriceHQ?: number;
+  regularSaleVelocity?: number;
+  lastUploadTime?: number;
+}
+
+/** 取得單一物品的在售清單 */
+export async function fetchItemMarketBoard(
+  worldOrDC: string | number,
+  itemId: number,
+  signal?: AbortSignal
+): Promise<ItemMarketBoard> {
+  const url = `${UNIVERSALIS_BASE}/${worldOrDC}/${itemId}?listings=100&entries=0`;
+  const raw = (await universalisRequests.request((s) => fetchWithStatus(url, s), {
+    signal,
+  })) as RawBoardResponse;
+
+  return {
+    itemId: raw.itemID ?? itemId,
+    listings: (raw.listings ?? []).map((l) => ({
+      pricePerUnit: Number(l.pricePerUnit) || 0,
+      quantity: Number(l.quantity) || 0,
+      total: Number(l.total) || 0,
+      hq: Boolean(l.hq),
+      worldName: (l.worldName as string) || '',
+      retainerName: (l.retainerName as string) || '',
+    })),
+    minPriceNQ: raw.minPriceNQ ?? 0,
+    minPriceHQ: raw.minPriceHQ ?? 0,
+    averagePriceNQ: Math.round(raw.averagePriceNQ ?? 0),
+    averagePriceHQ: Math.round(raw.averagePriceHQ ?? 0),
+    saleVelocity: raw.regularSaleVelocity ?? 0,
+    lastUploadTime: raw.lastUploadTime ?? 0,
+  };
+}
+
+/** 取得單一物品指定天數內的成交紀錄（由新到舊） */
+export async function fetchItemSaleHistory(
+  worldOrDC: string | number,
+  itemId: number,
+  days: number,
+  signal?: AbortSignal
+): Promise<ItemSaleEntry[]> {
+  // entriesWithin 以秒為單位
+  const url =
+    `${UNIVERSALIS_BASE}/history/${worldOrDC}/${itemId}` +
+    `?entriesWithin=${days * 86400}&entriesToReturn=1800`;
+
+  const raw = (await universalisRequests.request((s) => fetchWithStatus(url, s), {
+    signal,
+  })) as { entries?: Array<Record<string, unknown>> };
+
+  return (raw.entries ?? [])
+    .map((e) => {
+      const pricePerUnit = Number(e.pricePerUnit) || 0;
+      const quantity = Number(e.quantity) || 0;
+      return {
+        pricePerUnit,
+        quantity,
+        total: Number(e.total) || pricePerUnit * quantity,
+        hq: Boolean(e.hq),
+        buyerName: (e.buyerName as string) || '',
+        worldName: (e.worldName as string) || '',
+        timestamp: Number(e.timestamp) || 0,
+      };
+    })
+    .sort((a, b) => b.timestamp - a.timestamp);
+}

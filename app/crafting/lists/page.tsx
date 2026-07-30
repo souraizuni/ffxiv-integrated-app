@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
+import useSWR from 'swr';
+import { peekItem, loadItemsPack } from '@/lib/data/items';
 import { useCraftingLists } from '@/hooks/use-crafting-lists';
 import { MaterialSummary } from '@/components/material-summary';
 import { CopyButton } from '@/components/copy-button';
@@ -66,11 +68,14 @@ export default function CraftingListsPage() {
     return () => clearTimeout(timer);
   }, [searchQuery, handleSearch]);
 
-  // 建構圖示 URL（統一格式）
-  const buildIconUrl = (itemId: number): string => {
-    const folder = Math.floor(itemId / 1000) * 1000;
-    return `https://cafemaker.wakingsands.com/i/${folder}/${String(itemId).padStart(6, '0')}.png`;
-  };
+  // 物品資料包載入後觸發重繪，讓下方的同步 peekItem 查得到圖示
+  useSWR('items-pack', loadItemsPack, { revalidateOnFocus: false });
+
+  // 建構圖示 URL。
+  // 圖示路徑用的是 icon id 而非 item id —— 全庫 50,774 筆物品中，
+  // iconId 恰好等於 itemId 的是 0 筆，先前直接拿 item id 組路徑等於每個圖示都是錯的。
+  // 這裡在 render 中同步查本地資料；資料尚未載入時回空字串，<img> 的 onError 會把它藏起來。
+  const buildIconUrl = (itemId: number): string => peekItem(itemId)?.iconUrl || '';
 
   // 新增物品到清單
   const handleAddItem = async (recipe: RecipeInfo) => {

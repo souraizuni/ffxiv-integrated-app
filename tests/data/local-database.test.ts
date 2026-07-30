@@ -65,6 +65,17 @@ describe('物品資料庫', () => {
     expect(iconUrlFromId(0)).toBe('');
   });
 
+  it('iconId 與 itemId 是不同的東西，不可互用', async () => {
+    // 生產指引與製作清單先前直接拿 item id 去組圖示路徑，導致每個圖示都是錯的。
+    // 這條測試把「兩者不同」這件事釘死，避免再次寫成 iconUrlFromId(itemId)。
+    const item = await getItem(5057);
+    expect(item!.iconId).not.toBe(item!.id);
+    expect(decodeURIComponent(item!.iconUrl)).toContain(
+      String(item!.iconId).padStart(6, '0')
+    );
+    expect(decodeURIComponent(item!.iconUrl)).not.toContain('005057');
+  });
+
   it('中文搜尋：完全相符優先', async () => {
     const hits = await searchItems('黑鐵錠', { limit: 10 });
     expect(hits[0].id).toBe(5057);

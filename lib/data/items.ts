@@ -193,3 +193,78 @@ export async function getGameDataVersion(): Promise<{ generatedAt: string; versi
   const pack = await loadItemsPack();
   return { generatedAt: pack.generatedAt, version: pack.game?.version || 'unknown' };
 }
+
+/** 依分類批次取得物品（市場掃描器用） */
+export interface CategoryQuery {
+  /** ItemUICategory row id 清單 */
+  categoryIds: number[];
+  /** 物品等級上限；未指定則不限 */
+  maxItemLevel?: number;
+  /** 只要可在市場交易的物品 */
+  marketableOnly?: boolean;
+}
+
+/**
+ * 依分類 + 物品等級取出物品。
+ *
+ * 這取代了先前對 Cafemaker 的分頁爬取
+ * （每個分類最多 20 頁 × 250 筆、併發 3，且該服務已停止運作）。
+ * 本地一次過濾即可完成，不需要任何網路請求。
+ */
+export async function getItemsByCategories(query: CategoryQuery): Promise<GameItem[]> {
+  const { categoryIds, maxItemLevel, marketableOnly = false } = query;
+  if (categoryIds.length === 0) return [];
+
+  const pack = await loadItemsPack();
+  const wanted = new Set(categoryIds);
+  const result: GameItem[] = [];
+
+  for (const [idStr, raw] of Object.entries(pack.items)) {
+    if (!wanted.has(raw.u)) continue;
+    if (maxItemLevel !== undefined && raw.l > maxItemLevel) continue;
+    if (marketableOnly && (raw.f & FLAG_MARKETABLE) === 0) continue;
+
+    result.push(toGameItem(Number(idStr), raw, pack.categories));
+  }
+
+  return result;
+}
+
+/** 取得分類 id → 英文名稱對照（繁中名稱見 lib/i18n/item-categories.ts） */
+export async function getCategoryNames(): Promise<Record<string, string>> {
+  const pack = await loadItemsPack();
+  return pack.categories;
+}
+
+/**
+ * 找出與指定物品相關的物品：同分類、物品等級相近。
+ * 用於市場查詢頁的「相關物品」，讓使用者能橫向比較同級品的價差。
+ */
+export async function getRelatedItems(
+  itemId: number,
+  limit = 12
+): Promise<GameItem[]> {
+  const pack = await loadItemsPack();
+  const raw = pack.items[String(itemId)];
+  if (!raw) return [];
+
+  const candidates: Array<{ item: GameItem; distance: number }> = [];
+
+  for (const [idStr, other] of Object.entries(pack.items)) {
+    const id = Number(idStr);
+    if (id === itemId) continue;
+    if (other.u !== raw.u) continue;
+    // 只列可交易的，否則點進去也查不到行情
+    if ((other.f & FLAG_MARKETABLE) === 0) continue;
+
+    candidates.push({
+      item: toGameItem(id, other, pack.categories),
+      distance: Math.abs(other.l - raw.l),
+    });
+  }
+
+  // 等級最接近的優先；同距離時以等級高者優先（通常是玩家更關心的版本）
+  candidates.sort((a, b) => a.distance - b.distance || b.item.itemLevel - a.item.itemLevel);
+
+  return candidates.slice(0, limit).map((c) => c.item);
+}

@@ -12,13 +12,19 @@ import {
   saveServerConfig,
 } from '@/hooks/use-universalis';
 import { getItemNameTw, s2t } from '@/lib/i18n/tw-translation';
+import { getItemsByCategories, getItem, getCategoryNames } from '@/lib/data/items';
+import { getCategoryNameTw } from '@/lib/i18n/item-categories';
+import { fetchWithStatus } from '@/lib/net/request-manager';
+import { universalisRequests } from '@/lib/net/universalis-requests';
+import { ItemLookup } from '@/components/market/item-lookup';
 
 // ============================================
 // 常數 & 類型
 // ============================================
 
 const UNI_BASE = 'https://universalis.app/api/v2';
-const CAFE_BASE = 'https://cafemaker.wakingsands.com';
+// 註：分類、物品清單原本取自 Cafemaker，該服務已停止運作（HTTP 530 / Cloudflare 1016），
+// 導致掃描完全無法執行。現全部改由本地物品資料庫（public/data/items.msgpack）提供。
 
 interface CategoryGroup {
   label: string;
@@ -96,10 +102,13 @@ type SortKey = 'score' | 'velocity' | 'sellersCount' | 'minListingPrice' | 'abso
 // 工具函式
 // ============================================
 
-async function fetchJSON<T = unknown>(url: string): Promise<T> {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`HTTP ${r.status}: ${url.substring(0, 80)}`);
-  return r.json();
+// 一次掃描會連發數十個批次請求。統一走共用佇列：節流 + 429/5xx 指數退避重試。
+// 先前是裸 fetch、批次之間沒有任何間隔，大範圍掃描很容易被 Universalis 擋下來。
+async function fetchJSON<T = unknown>(url: string, signal?: AbortSignal): Promise<T> {
+  return universalisRequests.request(
+    (s) => fetchWithStatus(url, s) as Promise<T>,
+    { signal, maxRetries: 3 }
+  );
 }
 
 function fmtGil(n: number): string {
@@ -274,34 +283,29 @@ export default function MarketScannerPage() {
     } catch {}
   }, [selectedDC, selectedWorld, maxIlvl, regionScope, itemIdInput, selectedCategories, dcLoaded, currentDcWorlds]);
 
+  // 單一物品查詢的對象：與掃描器共用同一組伺服器設定
+  const lookupTarget = regionScope === 'dc' ? selectedDC : selectedWorld;
+
   // ---- 載入分類 Metadata ----
+  // 改由本地物品資料庫提供英文名稱，繁中名稱來自 lib/i18n/item-categories.ts。
+  // 先前向 Cafemaker 取得，該服務已停用，實際落到只有 18 個分類的 fallback。
   async function loadCategoryMeta() {
     const meta: Record<number, CategoryMeta> = {};
     try {
-      const url = `${CAFE_BASE}/ItemUICategory?limit=200&columns=ID,Name,Name_chs,Name_en`;
-      const data: { Results?: Array<{ ID: number; Name?: string; Name_chs?: string; Name_en?: string }> } = await fetchJSON(url);
-      for (const r of data.Results || []) {
-        if (r.ID && r.ID > 0) {
-          const nameCn = r.Name_chs || r.Name || '';
-          const nameEn = r.Name_en || '';
-          if (!nameCn && !nameEn) continue;
-          meta[r.ID] = { id: r.ID, nameCn, nameEn, nameTw: s2t(nameCn) };
-        }
+      const namesEn = await getCategoryNames();
+      for (const [idStr, nameEn] of Object.entries(namesEn)) {
+        const id = Number(idStr);
+        if (!id || id <= 0) continue;
+        const nameTw = getCategoryNameTw(id, nameEn);
+        meta[id] = { id, nameCn: nameTw, nameEn, nameTw };
       }
     } catch (e) {
-      console.warn('Failed to load categories from API', e);
-      // Fallback
-      const fallback: Record<number, string> = {
-        44:'藥品',45:'食材',46:'食品',47:'水產品',48:'石材',49:'金屬',50:'木材',
-        51:'布料',52:'皮革',53:'骨材',54:'煉金原料',55:'染料',56:'部件',57:'家具',
-        58:'魔晶石',59:'水晶',60:'觸媒',61:'雜貨',
-      };
-      for (const [id, name] of Object.entries(fallback)) {
-        meta[Number(id)] = { id: Number(id), nameCn: name, nameEn: '', nameTw: name };
-      }
+      console.warn('載入分類資料失敗', e);
     }
     setCategoryMeta(meta);
+    return meta;
   }
+
 
   // ---- 分類選擇函式 ----
   const toggleCategory = useCallback((catId: number) => {
@@ -430,97 +434,59 @@ export default function MarketScannerPage() {
     abortRef.current = false;
 
     try {
-      setStatusMsg('載入可交易物品清單...');
-      setProgress(2);
-      const marketable: number[] = await fetchJSON(`${UNI_BASE}/marketable`);
-      const marketableSet = new Set(marketable);
-      setProgress(10);
-      setStatusMsg(`已載入 ${marketable.length.toLocaleString()} 個可交易物品`);
-
-      // 從 Cafemaker 取得分類物品（並行化，同時跑 3 個分類以提升效能）
+      // ---- 從本地物品資料庫取得待掃描物品 ----
+      // 原本流程：向 Universalis 抓 16,843 筆可交易清單，再向 Cafemaker 逐分類分頁爬取
+      //（每分類最多 20 頁 × 250 筆、併發 3）。Cafemaker 已停止服務，該路徑完全失效。
+      // 現在分類、等級、可交易與可 HQ 全部來自 items.msgpack，一次過濾完成，零網路請求。
       interface ItemInfo { id: number; nameCn: string; nameEn: string; ilvl: number; catId: number; canHq: boolean }
+
+      setStatusMsg('從本地資料庫載入物品...');
+      setProgress(5);
+
       let allItems: ItemInfo[] = [];
       const catList = [...selectedCategories];
 
       if (catList.length > 0) {
-        const CONCURRENCY = 3; // 同時抓取的分類數
-        let completedCats = 0;
+        const found = await getItemsByCategories({
+          categoryIds: catList,
+          maxItemLevel: maxIlvl,
+          marketableOnly: true,
+        });
 
-        // 單一分類的抓取邏輯
-        async function fetchCategory(catId: number): Promise<ItemInfo[]> {
-          const items: ItemInfo[] = [];
-          try {
-            let page = 1;
-            while (page <= 20) {
-              if (abortRef.current) break;
-              const url = `${CAFE_BASE}/search?indexes=Item&filters=ItemUICategory.ID=${catId},LevelItem<=${maxIlvl}&columns=ID,Name,Name_chs,Name_en,LevelItem,CanBeHq&limit=250&page=${page}`;
-              const data: { Results?: Array<{ ID: number; Name?: string; Name_chs?: string; Name_en?: string; LevelItem?: number; CanBeHq?: boolean }>; Pagination?: { PageTotal?: number } } = await fetchJSON(url);
-              const pageResults = data.Results || [];
-              if (pageResults.length === 0) break;
+        allItems = found.map((item) => ({
+          id: item.id,
+          // 本地資料直接是繁中，不需要再經簡轉繁
+          nameCn: item.name,
+          nameEn: item.nameEn,
+          ilvl: item.itemLevel,
+          catId: item.categoryId,
+          canHq: item.canBeHQ,
+        }));
 
-              for (const r of pageResults) {
-                if (r.ID && marketableSet.has(r.ID)) {
-                  items.push({
-                    id: r.ID,
-                    nameCn: r.Name_chs || r.Name || '',
-                    nameEn: r.Name_en || r.Name || '',
-                    ilvl: r.LevelItem ?? 0,
-                    catId,
-                    canHq: !!r.CanBeHq,
-                  });
-                }
-              }
-              if (page >= (data.Pagination?.PageTotal || 1)) break;
-              page++;
-              await new Promise(r => setTimeout(r, 80));
-            }
-          } catch (e) {
-            console.warn(`分類 ${catId} 載入失敗:`, e);
-          }
-          completedCats++;
-          setProgress(10 + Math.round((completedCats / catList.length) * 30));
-          setStatusMsg(`已完成 ${completedCats}/${catList.length} 個分類...`);
-          return items;
-        }
-
-        // 控制並行數的 worker pool
-        const categoryResults: ItemInfo[][] = [];
-        let catIdx = 0;
-        async function catWorker() {
-          while (catIdx < catList.length && !abortRef.current) {
-            const idx = catIdx++;
-            categoryResults[idx] = await fetchCategory(catList[idx]);
-          }
-        }
-        await Promise.all(
-          Array.from({ length: Math.min(CONCURRENCY, catList.length) }, () => catWorker())
-        );
-        allItems = categoryResults.flat();
+        setProgress(30);
+        setStatusMsg(`已從 ${catList.length} 個分類取得 ${allItems.length} 個物品`);
       }
 
       // 直接指定的物品 ID
       if (directItemIds.length > 0) {
         setStatusMsg(`取得 ${directItemIds.length} 個指定物品資料...`);
         setProgress(35);
+
         for (const itemId of directItemIds) {
-          if (!marketableSet.has(itemId)) continue;
-          try {
-            const data: { ID?: number; Name?: string; Name_chs?: string; Name_en?: string; LevelItem?: number; CanBeHq?: boolean } = await fetchJSON(`${CAFE_BASE}/item/${itemId}?columns=ID,Name,Name_chs,Name_en,LevelItem,CanBeHq`);
-            if (data?.ID) {
-              allItems.push({
-                id: data.ID,
-                nameCn: data.Name_chs || data.Name || '',
-                nameEn: data.Name_en || data.Name || '',
-                ilvl: data.LevelItem ?? 0,
-                catId: 0,
-                canHq: !!data.CanBeHq,
-              });
-            }
-          } catch (e) {
-            console.warn(`物品 ${itemId} 載入失敗:`, e);
-          }
+          const item = await getItem(itemId);
+          if (!item || !item.isMarketable) continue;
+
+          allItems.push({
+            id: item.id,
+            nameCn: item.name,
+            nameEn: item.nameEn,
+            ilvl: item.itemLevel,
+            catId: item.categoryId,
+            canHq: item.canBeHQ,
+          });
         }
       }
+
 
       // 去重
       const seen = new Set<number>();
@@ -765,8 +731,16 @@ export default function MarketScannerPage() {
 
       {/* 提示 */}
       <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 text-sm text-blue-700 dark:text-blue-300">
-        💡 選擇資料中心後，會自動載入該中心所有伺服器。掃描分類可多選，也可直接輸入物品 ID。掃描約需 1～3 分鐘。
-        資料來源：Cafemaker（物品名）+ Universalis（市場行情）。
+        💡 選擇資料中心後，會自動載入該中心所有伺服器。掃描分類可多選，也可直接輸入物品 ID。
+        物品名稱與分類來自本地資料庫（離線、即時），市場行情來自 Universalis。
+      </div>
+
+      {/* 單一物品行情查詢 —— 不必先跑一次完整掃描就能查價 */}
+      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+          🔍 查詢單一物品行情
+        </h2>
+        <ItemLookup queryTarget={lookupTarget} />
       </div>
 
       {/* 設定面板 */}
