@@ -633,3 +633,40 @@ export function lowestTaxRate(rates: TaxRates): { city: string; rate: number } |
 export function netAfterTax(price: number, taxRatePercent: number): number {
   return price - Math.floor((price * taxRatePercent) / 100);
 }
+
+export interface WorldTaxRates {
+  world: string;
+  rates: TaxRates;
+  /** 該世界最低的城市稅率；查詢失敗時為 null */
+  lowest: { city: string; rate: number } | null;
+  error?: string;
+}
+
+/**
+ * 批次取得多個世界的稅率。
+ *
+ * 各世界稅率不同（實測繁中服有 0% 到 5% 的差距），同一世界內各城市也不同，
+ * 因此要決定「該去哪賣」必須看整個資料中心的矩陣，而不是單一世界。
+ * 全部經過共用請求佇列，不會一次打爆 Universalis。
+ */
+export async function fetchTaxRatesForWorlds(
+  worlds: string[],
+  signal?: AbortSignal
+): Promise<WorldTaxRates[]> {
+  return Promise.all(
+    worlds.map(async (world) => {
+      try {
+        const rates = await fetchTaxRates(world, signal);
+        return { world, rates, lowest: lowestTaxRate(rates) };
+      } catch (error) {
+        // 單一世界失敗不該讓整張表消失
+        return {
+          world,
+          rates: {},
+          lowest: null,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    })
+  );
+}

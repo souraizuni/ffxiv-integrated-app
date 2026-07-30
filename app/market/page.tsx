@@ -16,6 +16,7 @@ import { getCategoryNameTw } from '@/lib/i18n/item-categories';
 import { fetchWithStatus } from '@/lib/net/request-manager';
 import { universalisRequests } from '@/lib/net/universalis-requests';
 import { ItemLookup } from '@/components/market/item-lookup';
+import { TaxRatesPanel } from '@/components/market/tax-rates-panel';
 
 // ============================================
 // 常數 & 類型
@@ -741,6 +742,15 @@ export default function MarketScannerPage() {
         </h2>
         <ItemLookup queryTarget={lookupTarget} world={selectedWorld} />
       </div>
+
+      {/* 市場稅率：整個資料中心 × 所有城市，決定該去哪上架 */}
+      {selectedDC && currentDcWorlds.length > 0 && (
+        <TaxRatesPanel
+          dataCenter={selectedDC}
+          worlds={currentDcWorlds.map((w) => w.name)}
+          currentWorld={selectedWorld}
+        />
+      )}
 
       {/* 設定面板 */}
       <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4">

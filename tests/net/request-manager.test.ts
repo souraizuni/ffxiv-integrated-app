@@ -1,7 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { RequestManager, isAbortError } from '@/lib/net/request-manager';
 import { LRUCache } from '@/lib/net/lru-cache';
-import { lowestTaxRate, netAfterTax, TAX_CITY_NAMES } from '@/hooks/use-universalis';
+import {
+  lowestTaxRate,
+  netAfterTax,
+  fetchTaxRatesForWorlds,
+  TAX_CITY_NAMES,
+} from '@/hooks/use-universalis';
 
 // ============================================
 // 請求治理層
@@ -221,6 +226,59 @@ describe('市場稅率與淨利', () => {
       'Kugane', 'Crystarium', 'Old Sharlayan', 'Tuliyollal',
     ]) {
       expect(TAX_CITY_NAMES[city]).toBeTruthy();
+    }
+  });
+});
+
+// ---- 稅率矩陣 ----
+// 各世界稅率不同（實測繁中服 0%–5%），同世界內各城市也不同，
+// 因此「該去哪上架」必須看整個資料中心的矩陣。
+
+describe('fetchTaxRatesForWorlds', () => {
+  it('單一世界查詢失敗不會讓整張表消失', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.includes('BROKEN')) throw new Error('network down');
+      return new Response(JSON.stringify({ Gridania: 5, Ishgard: 3 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const result = await fetchTaxRatesForWorlds(['GOOD', 'BROKEN']);
+
+      expect(result).toHaveLength(2);
+
+      const good = result.find((r) => r.world === 'GOOD')!;
+      expect(good.error).toBeUndefined();
+      expect(good.lowest).toEqual({ city: 'Ishgard', rate: 3 });
+
+      const broken = result.find((r) => r.world === 'BROKEN')!;
+      expect(broken.error).toBeTruthy();
+      expect(broken.lowest).toBeNull();
+      expect(broken.rates).toEqual({});
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('稅率 0% 要被視為有效值而非缺值', async () => {
+    // 實測「拉姆」全城市 0%，若用 truthy 判斷會整列消失
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ Gridania: 0, Ishgard: 0 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch;
+
+    try {
+      const [entry] = await fetchTaxRatesForWorlds(['ZERO']);
+      expect(entry.lowest).toEqual({ city: 'Gridania', rate: 0 });
+      expect(entry.rates.Ishgard).toBe(0);
+    } finally {
+      globalThis.fetch = original;
     }
   });
 });
