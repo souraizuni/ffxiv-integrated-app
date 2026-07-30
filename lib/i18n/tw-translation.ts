@@ -1,45 +1,12 @@
 // ============================================
-// 繁體中文翻譯服務
-// 使用 ffxiv-teamcraft 的翻譯資料
+// 簡體→繁體逐字轉換
 // ============================================
-
-import twItemsData from '@/data/tw-items.json';
-
-// 繁體中文物品名稱映射表 (ID -> 繁體名稱)
-const twItems: Record<string, { tw: string }> = twItemsData;
-
-/**
- * 根據物品 ID 取得繁體中文名稱
- */
-export function getItemNameTw(itemId: number): string | null {
-  const item = twItems[String(itemId)];
-  return item?.tw || null;
-}
-
-/**
- * 根據物品 ID 取得繁體中文名稱，如果沒有則返回原始名稱
- */
-export function getItemNameTwOrFallback(itemId: number, fallbackName: string): string {
-  return getItemNameTw(itemId) || fallbackName;
-}
-
-/**
- * 批量取得繁體中文名稱
- */
-export function getItemNamesTw(itemIds: number[]): Map<number, string | null> {
-  const result = new Map<number, string | null>();
-  for (const id of itemIds) {
-    result.set(id, getItemNameTw(id));
-  }
-  return result;
-}
-
-/**
- * 檢查是否有繁體中文翻譯
- */
-export function hasItemNameTw(itemId: number): boolean {
-  return twItems[String(itemId)]?.tw !== undefined;
-}
+// 本檔原本另外 import data/tw-items.json（2.1 MB）提供物品名稱查詢，
+// 該 JSON 會被整包打進 JS bundle。物品名稱現已由 lib/data/items.ts
+// （public/data/items.msgpack，按需載入）提供，因此這裡只保留不依賴任何資料檔的字元對照表。
+//
+// 注意：tw-items.json 仍是 scripts/build-data/build-items.mjs 的建置輸入，
+// 只是不再進入執行時的 bundle。
 
 // ---- 簡體→繁體逐字映射表（綜合版，覆蓋 FF14 常用字）----
 const S2T_MAP: Record<string, string> = {

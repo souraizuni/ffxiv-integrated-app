@@ -11,7 +11,6 @@ import {
   loadServerConfig,
   saveServerConfig,
 } from '@/hooks/use-universalis';
-import { getItemNameTw, s2t } from '@/lib/i18n/tw-translation';
 import { getItemsByCategories, getItem, getCategoryNames } from '@/lib/data/items';
 import { getCategoryNameTw } from '@/lib/i18n/item-categories';
 import { fetchWithStatus } from '@/lib/net/request-manager';
@@ -624,9 +623,9 @@ export default function MarketScannerPage() {
             // 綜合評分 = 中位價 × 日銷量 × 吸收率 × 競爭修正
             const score = Math.round(medianPrice * velocity * absorptionRate * competitionFactor);
 
-            // 嘗試繁中翻譯
-            const twName = getItemNameTw(meta.id);
-            const displayName = twName || s2t(meta.nameCn) || meta.nameEn;
+            // 名稱已由本地物品資料庫直接提供繁中（toGameItem 內建英文 fallback），
+            // 不再需要查翻譯表或做簡轉繁
+            const displayName = meta.nameCn || meta.nameEn;
 
             scanResults.push({
               id: meta.id,
