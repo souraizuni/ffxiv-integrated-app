@@ -739,7 +739,7 @@ export default function MarketScannerPage() {
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
           🔍 查詢單一物品行情
         </h2>
-        <ItemLookup queryTarget={lookupTarget} />
+        <ItemLookup queryTarget={lookupTarget} world={selectedWorld} />
       </div>
 
       {/* 設定面板 */}

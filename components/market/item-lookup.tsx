@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from '
 import useSWR from 'swr';
 import { searchItems, getItem, type GameItem } from '@/lib/data/items';
 import { ItemMarketDetail } from './item-market-detail';
+import { AdvancedSearch } from './advanced-search';
 import {
   subscribeMarketHistory,
   getMarketHistorySnapshot,
@@ -20,9 +21,11 @@ import {
 interface ItemLookupProps {
   /** 查詢對象：世界名或資料中心名 */
   queryTarget: string;
+  /** 使用者所在世界，用於查稅率 */
+  world?: string;
 }
 
-export function ItemLookup({ queryTarget }: ItemLookupProps) {
+export function ItemLookup({ queryTarget, world }: ItemLookupProps) {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<GameItem | null>(null);
   const [showResults, setShowResults] = useState(false);
@@ -165,10 +168,14 @@ export function ItemLookup({ queryTarget }: ItemLookupProps) {
         </div>
       )}
 
+      {/* 進階搜尋：一般搜尋只能比對名稱，這裡可組合分類／等級／品質條件 */}
+      {!selected && <AdvancedSearch onSelectItem={selectItem} />}
+
       {selected && (
         <ItemMarketDetail
           item={selected}
           queryTarget={queryTarget}
+          world={world}
           onClose={clearSelection}
           onSelectItem={selectItem}
         />

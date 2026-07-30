@@ -7,6 +7,7 @@ import {
   getItem,
   getCategoryNames,
   getRelatedItems,
+  advancedSearchItems,
 } from '@/lib/data/items';
 import { getCategoryNameTw, hasCategoryNameTw } from '@/lib/i18n/item-categories';
 
@@ -167,5 +168,62 @@ describe('相關物品', () => {
 
   it('不存在的物品回傳空陣列', async () => {
     expect(await getRelatedItems(99999999)).toEqual([]);
+  });
+});
+
+describe('進階搜尋', () => {
+  it('多關鍵字需全部命中（AND，非任一命中）', async () => {
+    const hits = await advancedSearchItems({ keywords: '黑鐵 錠', limit: 50 });
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits.every((h) => h.name.includes('黑鐵') && h.name.includes('錠'))).toBe(true);
+
+    // 只用其中一個關鍵字應該命中更多，證明 AND 真的有收斂
+    const looser = await advancedSearchItems({ keywords: '錠', limit: 200 });
+    expect(looser.length).toBeGreaterThan(hits.length);
+  });
+
+  it('等級區間篩選', async () => {
+    const hits = await advancedSearchItems({ minItemLevel: 100, maxItemLevel: 200, limit: 50 });
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits.every((h) => h.itemLevel >= 100 && h.itemLevel <= 200)).toBe(true);
+  });
+
+  it('分類篩選', async () => {
+    const hits = await advancedSearchItems({ categoryIds: [49], limit: 50 });
+    expect(hits.every((h) => h.categoryId === 49)).toBe(true);
+  });
+
+  it('僅可 HQ', async () => {
+    const hits = await advancedSearchItems({ canBeHQOnly: true, limit: 50 });
+    expect(hits.every((h) => h.canBeHQ)).toBe(true);
+  });
+
+  it('僅可交易', async () => {
+    const hits = await advancedSearchItems({ marketableOnly: true, limit: 50 });
+    expect(hits.every((h) => h.isMarketable)).toBe(true);
+  });
+
+  it('條件可組合', async () => {
+    const hits = await advancedSearchItems({
+      categoryIds: [49],
+      marketableOnly: true,
+      canBeHQOnly: true,
+      limit: 30,
+    });
+    expect(hits.every((h) => h.categoryId === 49 && h.isMarketable && h.canBeHQ)).toBe(true);
+  });
+
+  it('英文關鍵字不分大小寫', async () => {
+    const hits = await advancedSearchItems({ keywords: 'IRON INGOT', limit: 20 });
+    expect(hits.some((h) => h.id === 5057)).toBe(true);
+  });
+
+  it('遵守 limit', async () => {
+    expect((await advancedSearchItems({ limit: 7 })).length).toBe(7);
+  });
+
+  it('無條件時不會爆掉，仍受 limit 保護', async () => {
+    const hits = await advancedSearchItems({});
+    expect(hits.length).toBeLessThanOrEqual(100);
   });
 });

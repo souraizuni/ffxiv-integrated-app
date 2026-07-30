@@ -268,3 +268,68 @@ export async function getRelatedItems(
 
   return candidates.slice(0, limit).map((c) => c.item);
 }
+
+// ---- 進階搜尋 ----
+
+export interface AdvancedSearchFilters {
+  /** 名稱關鍵字；支援以空白分隔的多關鍵字（需全部命中） */
+  keywords?: string;
+  categoryIds?: number[];
+  minItemLevel?: number;
+  maxItemLevel?: number;
+  marketableOnly?: boolean;
+  canBeHQOnly?: boolean;
+  limit?: number;
+}
+
+/**
+ * 進階搜尋：條件全部走本地資料庫，完全離線。
+ *
+ * 與 searchItems 的差別在於支援多關鍵字與分類／等級／品質條件組合，
+ * 例如「找 iLv 600-700、可 HQ、金屬類、名稱含『合金』的可交易物品」。
+ */
+export async function advancedSearchItems(
+  filters: AdvancedSearchFilters = {}
+): Promise<GameItem[]> {
+  const {
+    keywords = '',
+    categoryIds,
+    minItemLevel,
+    maxItemLevel,
+    marketableOnly = false,
+    canBeHQOnly = false,
+    limit = 100,
+  } = filters;
+
+  const pack = await loadItemsPack();
+
+  // 多關鍵字：以空白分隔，全部命中才算（AND），比單一子字串比對實用得多
+  const terms = keywords
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((t) => t.toLowerCase());
+
+  const wantedCategories = categoryIds && categoryIds.length > 0 ? new Set(categoryIds) : null;
+  const results: GameItem[] = [];
+
+  for (const [idStr, raw] of Object.entries(pack.items)) {
+    if (wantedCategories && !wantedCategories.has(raw.u)) continue;
+    if (minItemLevel !== undefined && raw.l < minItemLevel) continue;
+    if (maxItemLevel !== undefined && raw.l > maxItemLevel) continue;
+    if (marketableOnly && (raw.f & FLAG_MARKETABLE) === 0) continue;
+    if (canBeHQOnly && (raw.f & FLAG_CAN_BE_HQ) === 0) continue;
+
+    if (terms.length > 0) {
+      const haystack = `${raw.n} ${raw.e}`.toLowerCase();
+      if (!terms.every((t) => haystack.includes(t))) continue;
+    }
+
+    results.push(toGameItem(Number(idStr), raw, pack.categories));
+  }
+
+  // 名稱短者通常是更「正統」的那一個，排前面
+  results.sort((a, b) => a.name.length - b.name.length || a.itemLevel - b.itemLevel);
+
+  return results.slice(0, limit);
+}

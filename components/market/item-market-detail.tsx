@@ -5,6 +5,10 @@ import useSWR from 'swr';
 import {
   fetchItemMarketBoard,
   fetchItemSaleHistory,
+  fetchTaxRates,
+  lowestTaxRate,
+  netAfterTax,
+  TAX_CITY_NAMES,
   type ItemSaleEntry,
 } from '@/hooks/use-universalis';
 import { getRelatedItems, type GameItem } from '@/lib/data/items';
@@ -27,6 +31,8 @@ interface ItemMarketDetailProps {
   item: GameItem;
   /** 查詢對象：世界名或資料中心名 */
   queryTarget: string;
+  /** 使用者所在世界，用於查稅率。各世界稅率不同，且賣家繳的是自己上架地的稅 */
+  world?: string;
   onClose?: () => void;
   /** 點擊相關物品時切換查詢對象 */
   onSelectItem?: (item: GameItem) => void;
@@ -58,6 +64,7 @@ function fmtTime(tsSeconds: number): string {
 export function ItemMarketDetail({
   item,
   queryTarget,
+  world,
   onClose,
   onSelectItem,
 }: ItemMarketDetailProps) {
@@ -81,6 +88,32 @@ export function ItemMarketDetail({
       fetchItemSaleHistory(target, id, days),
     { revalidateOnFocus: false, dedupingInterval: 60_000 }
   );
+
+  // 各世界稅率不同，因此只在選定單一世界時查詢
+  const { data: taxRates } = useSWR(
+    world ? ['tax-rates', world] : null,
+    ([, w]: [string, string]) => fetchTaxRates(w),
+    { revalidateOnFocus: false, dedupingInterval: 600_000 }
+  );
+
+  const bestTax = useMemo(() => (taxRates ? lowestTaxRate(taxRates) : null), [taxRates]);
+
+  // 以目前最低在售價賣出、扣掉市場稅後的實收
+  const netEstimate = useMemo(() => {
+    const lowest = board?.minPriceNQ || board?.minPriceHQ || 0;
+    if (!lowest) return null;
+
+    // 未選定單一世界時無法取得稅率，以常見的 5% 估算並在畫面上標明
+    const rate = bestTax?.rate ?? 5;
+    return {
+      lowest,
+      rate,
+      city: bestTax?.city,
+      isEstimate: !bestTax,
+      net: netAfterTax(lowest, rate),
+      tax: lowest - netAfterTax(lowest, rate),
+    };
+  }, [board, bestTax]);
 
   const { data: related = [] } = useSWR(
     onSelectItem ? ['related-items', item.id] : null,
@@ -210,6 +243,33 @@ export function ItemMarketDetail({
           </button>
         )}
       </div>
+
+      {/* 淨利試算：扣掉市場稅才是真正入袋的金額 */}
+      {netEstimate && (
+        <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs border-t border-gray-100 dark:border-gray-800 pt-3">
+          <span className="text-gray-500">
+            以最低價{' '}
+            <b className="text-green-600 dark:text-green-400">
+              {netEstimate.lowest.toLocaleString()}
+            </b>{' '}
+            賣出
+          </span>
+          <span className="text-gray-500">
+            市場稅 {netEstimate.rate}%
+            {netEstimate.city && `（${TAX_CITY_NAMES[netEstimate.city] || netEstimate.city}）`}
+            <b className="text-red-500 ml-1">-{netEstimate.tax.toLocaleString()}</b>
+          </span>
+          <span className="text-gray-500">
+            實收{' '}
+            <b className="text-emerald-600 dark:text-emerald-400">
+              {netEstimate.net.toLocaleString()}
+            </b>
+          </span>
+          {netEstimate.isEstimate && (
+            <span className="text-gray-400">（稅率需選定單一伺服器，此處以 5% 估算）</span>
+          )}
+        </div>
+      )}
 
       {!hasTarget ? (
         <p className="text-sm text-gray-500 py-6 text-center">
@@ -462,6 +522,11 @@ export function ItemMarketDetail({
             )}
           </section>
 
+          {/* 堆疊分布：一眼看出有沒有人整組賣，而不必逐筆掃在售清單 */}
+          {board && board.stackSizes.length > 0 && (
+            <StackSizeBreakdown stacks={board.stackSizes} />
+          )}
+
           {/* 成交明細 */}
           {history.length > 0 && <SaleHistoryTable entries={history} />}
 
@@ -541,6 +606,41 @@ function SaleHistoryTable({ entries }: { entries: ItemSaleEntry[] }) {
             ))}
           </tbody>
         </table>
+      </div>
+    </section>
+  );
+}
+
+/** 在售堆疊大小分布 */
+function StackSizeBreakdown({ stacks }: { stacks: Array<{ size: number; count: number }> }) {
+  const maxCount = Math.max(...stacks.map((s) => s.count));
+  const totalListings = stacks.reduce((sum, s) => sum + s.count, 0);
+  const totalUnits = stacks.reduce((sum, s) => sum + s.size * s.count, 0);
+
+  return (
+    <section className="space-y-2">
+      <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+        📦 堆疊分布
+        <span className="ml-1 text-xs font-normal text-gray-500">
+          （{totalListings} 筆在售、共 {totalUnits.toLocaleString()} 個）
+        </span>
+      </h4>
+
+      <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-1">
+        {stacks.map((s) => (
+          <div key={s.size} className="flex items-center gap-2 text-xs">
+            <span className="w-12 text-right text-gray-600 dark:text-gray-400 shrink-0">
+              ×{s.size}
+            </span>
+            <div className="flex-1 h-3 bg-gray-100 dark:bg-gray-800 rounded overflow-hidden">
+              <div
+                className="h-full bg-blue-500/70"
+                style={{ width: `${(s.count / maxCount) * 100}%` }}
+              />
+            </div>
+            <span className="w-10 text-gray-500 shrink-0">{s.count} 筆</span>
+          </div>
+        ))}
       </div>
     </section>
   );

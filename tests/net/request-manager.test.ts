@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { RequestManager, isAbortError } from '@/lib/net/request-manager';
 import { LRUCache } from '@/lib/net/lru-cache';
+import { lowestTaxRate, netAfterTax, TAX_CITY_NAMES } from '@/hooks/use-universalis';
 
 // ============================================
 // 請求治理層
@@ -185,5 +186,41 @@ describe('LRUCache', () => {
 
     expect(cache.size).toBe(1);
     expect(cache.get('a')).toBe(2);
+  });
+});
+
+// ---- 市場稅率與淨利 ----
+// 賣出會被扣稅，不算進去的利潤估算一律偏高。
+
+describe('市場稅率與淨利', () => {
+  it('挑出稅率最低的城市', () => {
+    expect(lowestTaxRate({ Gridania: 5, Ishgard: 3, Kugane: 5 })).toEqual({
+      city: 'Ishgard',
+      rate: 3,
+    });
+  });
+
+  it('空物件回傳 null', () => {
+    expect(lowestTaxRate({})).toBeNull();
+  });
+
+  it('扣稅後實收（無條件捨去稅額）', () => {
+    expect(netAfterTax(1000, 5)).toBe(950);
+    expect(netAfterTax(1000, 3)).toBe(970);
+    // 999 × 5% = 49.95 → 稅額捨去為 49
+    expect(netAfterTax(999, 5)).toBe(950);
+  });
+
+  it('0% 稅率不扣款', () => {
+    expect(netAfterTax(1234, 0)).toBe(1234);
+  });
+
+  it('所有稅率城市都有繁中翻譯', () => {
+    for (const city of [
+      'Limsa Lominsa', 'Gridania', "Ul'dah", 'Ishgard',
+      'Kugane', 'Crystarium', 'Old Sharlayan', 'Tuliyollal',
+    ]) {
+      expect(TAX_CITY_NAMES[city]).toBeTruthy();
+    }
   });
 });

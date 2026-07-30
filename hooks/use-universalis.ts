@@ -495,6 +495,8 @@ export interface ItemSaleEntry {
 export interface ItemMarketBoard {
   itemId: number;
   listings: MarketPriceInfo['listings'];
+  /** 在售堆疊大小分布：key 為每組數量，value 為有幾組 */
+  stackSizes: Array<{ size: number; count: number }>;
   minPriceNQ: number;
   minPriceHQ: number;
   averagePriceNQ: number;
@@ -508,6 +510,7 @@ export interface ItemMarketBoard {
 interface RawBoardResponse {
   itemID?: number;
   listings?: Array<Record<string, unknown>>;
+  stackSizeHistogram?: Record<string, number>;
   minPriceNQ?: number;
   minPriceHQ?: number;
   averagePriceNQ?: number;
@@ -527,8 +530,15 @@ export async function fetchItemMarketBoard(
     signal,
   })) as RawBoardResponse;
 
+  // 堆疊分布：判斷「有沒有人整組賣」比逐筆看在售更快
+  const stackSizes = Object.entries(raw.stackSizeHistogram ?? {})
+    .map(([size, count]) => ({ size: Number(size), count: Number(count) }))
+    .filter((s) => Number.isFinite(s.size) && s.count > 0)
+    .sort((a, b) => a.size - b.size);
+
   return {
     itemId: raw.itemID ?? itemId,
+    stackSizes,
     listings: (raw.listings ?? []).map((l) => ({
       pricePerUnit: Number(l.pricePerUnit) || 0,
       quantity: Number(l.quantity) || 0,
@@ -577,4 +587,49 @@ export async function fetchItemSaleHistory(
       };
     })
     .sort((a, b) => b.timestamp - a.timestamp);
+}
+
+// ============================================
+// 市場稅率
+// ============================================
+// 賣出時會被扣稅，不算進去的利潤估算一律偏高。
+// Universalis 回傳英文城市名，這裡附上繁中對照。
+
+export type TaxRates = Record<string, number>;
+
+export const TAX_CITY_NAMES: Record<string, string> = {
+  'Limsa Lominsa': '利姆薩·羅敏薩',
+  Gridania: '格里達尼亞',
+  "Ul'dah": '烏爾達哈',
+  Ishgard: '伊修加德',
+  Kugane: '黃金港',
+  Crystarium: '水晶都',
+  'Old Sharlayan': '舊薩雷安',
+  Tuliyollal: '圖莉尤萊',
+};
+
+/** 取得指定世界的各城市市場稅率 */
+export async function fetchTaxRates(world: string, signal?: AbortSignal): Promise<TaxRates> {
+  const url = `${UNIVERSALIS_BASE}/tax-rates?world=${encodeURIComponent(world)}`;
+  return (await universalisRequests.request((s) => fetchWithStatus(url, s), {
+    signal,
+  })) as TaxRates;
+}
+
+/** 稅率最低的城市（賣家通常會挑這裡上架） */
+export function lowestTaxRate(rates: TaxRates): { city: string; rate: number } | null {
+  const entries = Object.entries(rates).filter(([, r]) => typeof r === 'number');
+  if (entries.length === 0) return null;
+
+  const [city, rate] = entries.reduce((min, cur) => (cur[1] < min[1] ? cur : min));
+  return { city, rate };
+}
+
+/**
+ * 扣除市場稅後的實收金額。
+ * @param price 售價
+ * @param taxRatePercent 稅率（百分比，例如 5 代表 5%）
+ */
+export function netAfterTax(price: number, taxRatePercent: number): number {
+  return price - Math.floor((price * taxRatePercent) / 100);
 }

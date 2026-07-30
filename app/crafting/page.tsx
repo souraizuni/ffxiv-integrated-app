@@ -6,6 +6,7 @@ import { ItemSourceBadges, ItemSourceInfoPanel } from '@/components/item-source-
 import { CraftingSimulator } from '@/components/crafting-simulator';
 import { fetchRecipe } from '@/hooks/use-xivapi';
 import { getItem } from '@/lib/data/items';
+import { useIsDesktop } from '@/hooks/use-media-query';
 import { buildMaterialTree, flattenMaterialTree } from '@/lib/recipe-tree';
 import { useGearsets, JOB_NAMES } from '@/hooks/use-gearsets';
 import { convertToRecipe, getRecipeByItemId, type RecipeInfo } from '@/lib/recipe-datasource';
@@ -34,6 +35,15 @@ export default function CraftingPage() {
   const [materialTree, setMaterialTree] = useState<MaterialTreeNode | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showStatsEditor, setShowStatsEditor] = useState(false);
+
+  // 側欄收合。桌機預設展開、手機預設收合；
+  // 使用者手動切換過就以手動值為準（null 代表尚未手動干預）。
+  const isDesktop = useIsDesktop();
+  const [recipePanelManual, setRecipePanelManual] = useState<boolean | null>(null);
+  const [simulatorManual, setSimulatorManual] = useState<boolean | null>(null);
+
+  const recipePanelOpen = recipePanelManual ?? isDesktop;
+  const simulatorOpen = simulatorManual ?? isDesktop;
   const [showCostCalculator, setShowCostCalculator] = useState(false);
   
   // 從生產紀錄載入的資料
@@ -234,24 +244,79 @@ export default function CraftingPage() {
     ? flattenMaterialTree(materialTree, true)
     : [];
 
+  // 選了配方之後，手機上自動把配方清單收起來，直接看內容
+  const handleRecipeSelectAndClose = useCallback(
+    (recipeInfo: RecipeInfo) => {
+      handleRecipeSelect(recipeInfo);
+      if (!isDesktop) setRecipePanelManual(false);
+    },
+    [handleRecipeSelect, isDesktop]
+  );
+
   return (
-    <div className="h-[calc(100vh-4rem)] flex">
+    <div className="h-[calc(100vh-4rem)] flex relative overflow-hidden">
+      {/* 手機：側欄以浮層呈現，開啟時用半透明遮罩讓使用者能點擊關閉 */}
+      {!isDesktop && (recipePanelOpen || simulatorOpen) && (
+        <div
+          className="fixed inset-0 top-16 bg-black/40 z-30"
+          onClick={() => {
+            setRecipePanelManual(false);
+            setSimulatorManual(false);
+          }}
+        />
+      )}
+
       {/* 左側：配方列表面板 */}
-      <div className="w-80 shrink-0 border-r border-gray-200 dark:border-gray-800">
+      <div
+        className={`
+          shrink-0 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900
+          transition-transform duration-200
+          ${isDesktop
+            ? `${recipePanelOpen ? 'w-80' : 'w-0 overflow-hidden border-r-0'}`
+            : `fixed inset-y-0 top-16 left-0 z-40 w-80 max-w-[85vw] shadow-xl
+               ${recipePanelOpen ? 'translate-x-0' : '-translate-x-full'}`
+          }
+        `}
+      >
         <RecipePanel
-          onSelect={handleRecipeSelect}
+          onSelect={handleRecipeSelectAndClose}
           selectedRecipeId={selectedRecipeInfo?.id}
         />
       </div>
 
       {/* 中間：配方詳情與材料 */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto p-6">
+      <div className="flex-1 overflow-y-auto min-w-0">
+        <div className="max-w-4xl mx-auto p-4 sm:p-6">
           {/* 頂部標題列 */}
-          <div className="flex items-center justify-between mb-6">
-            <h1 className="text-2xl font-bold">生產指引</h1>
-            
-            <div className="flex gap-2">
+          <div className="flex items-center justify-between gap-2 mb-6">
+            <div className="flex items-center gap-2 min-w-0">
+              <button
+                onClick={() => setRecipePanelManual(!recipePanelOpen)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors shrink-0"
+                aria-expanded={recipePanelOpen}
+                title={recipePanelOpen ? '收起配方清單' : '展開配方清單'}
+              >
+                <span aria-hidden>{recipePanelOpen ? '◀' : '▶'}</span>
+                <span className="hidden sm:inline">配方</span>
+              </button>
+              <h1 className="text-2xl font-bold truncate">生產指引</h1>
+            </div>
+
+            <div className="flex gap-2 shrink-0">
+              {recipe && (
+                <button
+                  onClick={() => setSimulatorManual(!simulatorOpen)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                    simulatorOpen
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  }`}
+                  aria-expanded={simulatorOpen}
+                  title={simulatorOpen ? '收起模擬器' : '展開模擬器'}
+                >
+                  ⚙️ <span className="hidden sm:inline">模擬器</span>
+                </button>
+              )}
               {/* 製作者屬性按鈕 */}
               <button
                 onClick={() => setShowStatsEditor(!showStatsEditor)}
@@ -455,9 +520,19 @@ export default function CraftingPage() {
         </div>
       </div>
 
-      {/* 右側：模擬器（固定寬度） */}
+      {/* 右側：模擬器 */}
       {recipe && (
-        <div className="w-96 shrink-0 border-l border-gray-200 dark:border-gray-800 overflow-y-auto bg-gray-50 dark:bg-gray-900/50">
+        <div
+          className={`
+            shrink-0 border-l border-gray-200 dark:border-gray-800 overflow-y-auto
+            bg-gray-50 dark:bg-gray-900/50 transition-transform duration-200
+            ${isDesktop
+              ? `${simulatorOpen ? 'w-96' : 'w-0 overflow-hidden border-l-0'}`
+              : `fixed inset-y-0 top-16 right-0 z-40 w-96 max-w-[90vw] shadow-xl
+                 ${simulatorOpen ? 'translate-x-0' : 'translate-x-full'}`
+            }
+          `}
+        >
           <div className="p-4">
             <CraftingSimulator
               recipe={recipe}
