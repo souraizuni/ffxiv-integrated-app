@@ -47,17 +47,34 @@ export async function initWasm(): Promise<boolean> {
   // 開始初始化
   wasmInitPromise = (async () => {
     try {
-      // 動態載入 WASM 模組
-      const module = await import('./app_wasm.js');
+      // 動態載入 WASM glue code（app_wasm_bg.js）
+      const bgModule = await import('./app_wasm_bg.js');
       
       // 從 public 目錄載入 WASM 二進位檔案
       // GitHub Pages 部署時 basePath 會是 /ffxiv-integrated-app
       const basePath = getBasePath();
       const wasmUrl = `${basePath}/wasm/app_wasm_bg.wasm`;
       
-      // 初始化
-      await module.default(wasmUrl);
-      wasmModule = module;
+      // 手動載入和初始化 WASM 模組
+      const response = await fetch(wasmUrl);
+      const bytes = await response.arrayBuffer();
+      
+      // 建立 import object，使用 bg module 提供的 helper 函式
+      const imports = {
+        './app_wasm_bg.js': bgModule,
+      };
+      
+      const { instance } = await WebAssembly.instantiate(bytes, imports);
+      
+      // 設定 wasm 參考到 bg module
+      bgModule.__wbg_set_wasm(instance.exports);
+      
+      // 初始化 externref table
+      if (instance.exports.__wbindgen_start) {
+        (instance.exports.__wbindgen_start as Function)();
+      }
+      
+      wasmModule = bgModule;
       isInitialized = true;
       
       console.log('[WasmSolver] WASM 模組初始化成功');
@@ -96,8 +113,8 @@ function getWasm() {
 /**
  * 建立新的生產狀態
  */
-export function newStatus(attrs: WasmAttributes, recipe: WasmRecipe): WasmStatus {
-  return getWasm().new_status(attrs, recipe);
+export function newStatus(attrs: WasmAttributes, recipe: WasmRecipe, stellarSteadyHandCount: number = 0): WasmStatus {
+  return getWasm().new_status(attrs, recipe, stellarSteadyHandCount);
 }
 
 /**
@@ -212,7 +229,8 @@ export function raphaelSolve(
   useQuickInnovation: boolean = false,
   useTrainedEye: boolean = false,
   backloadProgress: boolean = false,
-  adversarial: boolean = false
+  adversarial: boolean = false,
+  stellarSteadyHandCharges: number = 0
 ): WasmAction[] {
   return getWasm().raphael_solve(
     status,
@@ -222,15 +240,18 @@ export function raphaelSolve(
     useQuickInnovation,
     useTrainedEye,
     backloadProgress,
-    adversarial
+    adversarial,
+    stellarSteadyHandCharges
   );
 }
 
 /**
- * Rika 求解器（傳統演算法）
+ * Rika 求解器（已從新版 WASM 移除，改用 Raphael）
+ * @deprecated 使用 raphaelSolve 替代
  */
 export function rikaSolve(status: WasmStatus): WasmAction[] {
-  return getWasm().rika_solve(status);
+  console.warn('[WasmSolver] rika_solve 已從新版移除，改用 raphael_solve');
+  return raphaelSolve(status);
 }
 
 /**

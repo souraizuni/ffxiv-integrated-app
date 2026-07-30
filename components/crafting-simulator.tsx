@@ -1293,6 +1293,8 @@ function getConditionName(condition: CraftingState['condition']): string {
     Pliant: '柔韌',
     Malleable: '柔順',
     Primed: '長效',
+    GoodOmen: '高品質先兆',
+    Robust: '堅固先兆',
   };
   return names[condition];
 }
@@ -1308,6 +1310,8 @@ function getConditionColor(condition: CraftingState['condition']): string {
     Pliant: 'bg-green-100 text-green-700',
     Malleable: 'bg-cyan-100 text-cyan-700',
     Primed: 'bg-pink-100 text-pink-700',
+    GoodOmen: 'bg-orange-50 text-orange-600',
+    Robust: 'bg-blue-50 text-blue-600',
   };
   return colors[condition];
 }

@@ -48,10 +48,10 @@ interface WasmSolverModule {
       baseDurability?: number;
     }
   ) => any;
-  newStatus: (attrs: any, recipe: any) => any;
+  newStatus: (attrs: any, recipe: any, stellarSteadyHandCount?: number) => any;
   simulate: (status: any, actions: string[]) => { status: any; errors: any[] };
   highQualityProbability: (status: any) => number | null;
-  raphaelSolve: (status: any, targetQuality: number | null, useManipulation: boolean, useHeartAndSoul: boolean, useQuickInnovation: boolean, useTrainedEye: boolean, backloadProgress: boolean, adversarial: boolean) => string[];
+  raphaelSolve: (status: any, targetQuality: number | null, useManipulation: boolean, useHeartAndSoul: boolean, useQuickInnovation: boolean, useTrainedEye: boolean, backloadProgress: boolean, adversarial: boolean, stellarSteadyHandCharges?: number) => string[];
   rikaSolve: (status: any) => string[];
   dfsSolve: (status: any, depth: number, specialist: boolean) => string[];
 }
@@ -136,6 +136,7 @@ export interface RaphaelSolverOptions {
   backloadProgress?: boolean;     // 後置作業技能（快速求解）
   adversarial?: boolean;          // 確保 100% 可靠（防黑球）
   preferWasm?: boolean;           // 是否優先使用 WASM
+  stellarSteadyHandCharges?: number; // 星極堅手充能次數
 }
 
 /**
@@ -188,7 +189,7 @@ async function wasmRaphaelSolve(
     });
     
     // 建立初始狀態
-    const wasmStatus = wasmSolver.newStatus(wasmAttrs, wasmRecipe);
+    const wasmStatus = wasmSolver.newStatus(wasmAttrs, wasmRecipe, options.stellarSteadyHandCharges ?? 0);
     
     // 設定初期品質（來自 HQ 素材）
     if (options.initialQuality !== undefined && options.initialQuality > 0) {
@@ -229,7 +230,8 @@ async function wasmRaphaelSolve(
       solverParams.useQuickInnovation,
       solverParams.useTrainedEye,
       solverParams.backloadProgress,
-      solverParams.adversarial
+      solverParams.adversarial,
+      options.stellarSteadyHandCharges ?? 0
     );
     
     // 轉換動作序列為本專案格式
@@ -291,7 +293,7 @@ async function wasmRikaSolve(
       baseQuality: recipe.baseQuality,
       baseDurability: recipe.baseDurability,
     });
-    const wasmStatus = wasmSolver.newStatus(wasmAttrs, wasmRecipe);
+    const wasmStatus = wasmSolver.newStatus(wasmAttrs, wasmRecipe, 0);
     
     const wasmActions = wasmSolver.rikaSolve(wasmStatus);
     const actions = convertWasmActionsToLocal(wasmActions);
@@ -340,7 +342,7 @@ async function wasmDfsSolve(
       baseQuality: recipe.baseQuality,
       baseDurability: recipe.baseDurability,
     });
-    const wasmStatus = wasmSolver.newStatus(wasmAttrs, wasmRecipe);
+    const wasmStatus = wasmSolver.newStatus(wasmAttrs, wasmRecipe, 0);
     
     const wasmActions = wasmSolver.dfsSolve(wasmStatus, depth, specialist);
     const actions = convertWasmActionsToLocal(wasmActions);

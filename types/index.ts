@@ -162,7 +162,9 @@ export type CraftCondition =
   | 'Sturdy'
   | 'Pliant'
   | 'Malleable'
-  | 'Primed';
+  | 'Primed'
+  | 'GoodOmen'
+  | 'Robust';
 
 export interface CraftBuff {
   name: string;

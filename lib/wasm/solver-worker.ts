@@ -19,6 +19,7 @@ export interface SolverWorkerRequest {
     useTrainedEye?: boolean;
     backloadProgress?: boolean;
     adversarial?: boolean;
+    stellarSteadyHandCharges?: number;
     depth?: number;
     specialist?: boolean;
     useObserve?: boolean;
@@ -71,7 +72,8 @@ async function solve(request) {
         options.useQuickInnovation ?? false,
         options.useTrainedEye ?? false,
         options.backloadProgress ?? false,
-        options.adversarial ?? false
+        options.adversarial ?? false,
+        options.stellarSteadyHandCharges ?? 0
       );
       
     case 'rika':

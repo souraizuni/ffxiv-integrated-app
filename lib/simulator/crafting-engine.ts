@@ -73,6 +73,7 @@ const actionEfficiency: Record<string, { progress?: number; quality?: number }> 
   prudent_synthesis: { progress: 180 },
   rapid_synthesis: { progress: 500 },
   intensive_synthesis: { progress: 400 },
+  focused_synthesis: { progress: 200 },
   muscle_memory: { progress: 300 },
   delicate_synthesis: { progress: 150, quality: 100 },
   // 品質技能
@@ -87,6 +88,8 @@ const actionEfficiency: Record<string, { progress?: number; quality?: number }> 
   focused_touch: { quality: 150 },
   trained_finesse: { quality: 100 },
   reflect: { quality: 300 }, // 閃靜效率300%
+  refined_touch: { quality: 100 },
+  daring_touch: { quality: 150 },
 };
 
 /**
@@ -227,8 +230,8 @@ export function calculateDurabilityCost(
 ): number {
   let cost = baseCost;
   
-  // Sturdy 狀態減半
-  if (condition === 'Sturdy') {
+  // Sturdy 或 Robust 狀態減半
+  if (condition === 'Sturdy' || condition === 'Robust') {
     cost = Math.ceil(cost / 2);
   }
   
@@ -407,7 +410,11 @@ export function executeCraftAction(
   }
   
   // 產生下一個狀態（模擬時）
-  newState.condition = generateNextCondition(state.condition);
+  // QuickInnovation、HeartAndSoul、FinalAppraisal、CarefulObservation 不改變狀態
+  const noConditionChange = ['quick_innovation', 'heart_and_soul', 'final_appraisal', 'careful_observation'];
+  if (!noConditionChange.includes(action.id)) {
+    newState.condition = generateNextCondition(state.condition);
+  }
   
   return newState;
 }
@@ -473,9 +480,13 @@ function applyActionEffects(state: CraftingState, action: CraftAction): void {
     
     // Buff 技能
     case 'waste_not':
+      // 互斥：移除 WasteNot2
+      state.buffs = state.buffs.filter(b => b.name !== 'WasteNot2');
       addOrRefreshBuff(state, 'WasteNot', 4);
       break;
     case 'waste_not_2':
+      // 互斥：移除 WasteNot
+      state.buffs = state.buffs.filter(b => b.name !== 'WasteNot');
       addOrRefreshBuff(state, 'WasteNot2', 8);
       break;
     case 'innovation':
@@ -499,9 +510,70 @@ function applyActionEffects(state: CraftingState, action: CraftAction): void {
       state.durability = Math.min(state.recipe.durability, state.durability + 30);
       break;
     
+    // 完美精修恢復耐久至滿
+    case 'immaculate_mend':
+      state.durability = state.recipe.durability;
+      break;
+    
+    // 快速改革：賦予 Innovation 1 回合
+    case 'quick_innovation':
+      addOrRefreshBuff(state, 'Innovation', 1);
+      break;
+    
+    // 一心不亂：下一個技能不消耗耐久
+    case 'trained_perfection':
+      addOrRefreshBuff(state, 'TrainedPerfection', 999);
+      break;
+    
+    // 星極堅手
+    case 'stellar_steady_hand':
+      // 由 WASM 端處理，此處僅作佔位
+      break;
+    
+    // 設計變更：不消耗耐久也不推進，純粹改變狀態
+    case 'careful_observation':
+      break;
+    
+    // 能工巧匠圖紙
+    case 'heart_and_soul':
+      addOrRefreshBuff(state, 'HeartAndSoul', 999);
+      break;
+    
+    // 最終確認
+    case 'final_appraisal':
+      addOrRefreshBuff(state, 'FinalAppraisal', 5);
+      break;
+    
+    // 加工精密化：內靜 +2，連擊
+    case 'refined_touch':
+      addInnerQuietStack(state, 2);
+      clearTouchCombo(state);
+      break;
+    
+    // 大膽加工：內靜 +1
+    case 'daring_touch':
+      addInnerQuietStack(state, 1);
+      clearTouchCombo(state);
+      break;
+    
     // 觀察（用於連擊）
     case 'observe':
       addOrRefreshBuff(state, 'Observed', 1);
+      break;
+    
+    // 秘訣：恢復 20 CP
+    case 'tricks_of_the_trade':
+      state.cp = Math.min(state.crafterStats.cp, state.cp + 20);
+      break;
+    
+    // 注視技能（保持 Observed 連擊狀態的消耗）
+    case 'focused_synthesis':
+    case 'focused_touch':
+      state.buffs = state.buffs.filter(b => b.name !== 'Observed');
+      if (action.id === 'focused_touch') {
+        addInnerQuietStack(state, 1);
+      }
+      clearTouchCombo(state);
       break;
     
     default:
@@ -564,6 +636,12 @@ function generateNextCondition(currentCondition: CraftCondition): CraftCondition
   }
   if (currentCondition === 'Poor') {
     return 'Normal';
+  }
+  if (currentCondition === 'GoodOmen') {
+    return 'Good';
+  }
+  if (currentCondition === 'Robust') {
+    return 'Sturdy';
   }
   
   const rand = Math.random();
@@ -804,6 +882,28 @@ export const craftActions: CraftAction[] = [
     levelRequirement: 80,
     description: '第一步使用，直接將品質推滿（需要等級比配方等級高 10 級以上）',
   },
+  {
+    id: 'refined_touch',
+    name: 'Refined Touch',
+    nameZh: '加工精密化',
+    cpCost: 24,
+    durabilityCost: 10,
+    successRate: 100,
+    category: 'quality',
+    levelRequirement: 92,
+    description: '增加品質（效率 100%），內靜 +2',
+  },
+  {
+    id: 'daring_touch',
+    name: 'Daring Touch',
+    nameZh: '大膽加工',
+    cpCost: 0,
+    durabilityCost: 10,
+    successRate: 60,
+    category: 'quality',
+    levelRequirement: 96,
+    description: '增加品質（效率 150%），成功率 60%，內靜 +1',
+  },
   
   // ===== 耐久技能 =====
   {
@@ -895,6 +995,116 @@ export const craftActions: CraftAction[] = [
     category: 'buff',
     levelRequirement: 13,
     description: '不進行任何動作，等待下一個狀態',
+  },
+  {
+    id: 'focused_synthesis',
+    name: 'Focused Synthesis',
+    nameZh: '注視製作',
+    cpCost: 5,
+    durabilityCost: 10,
+    successRate: 50,
+    category: 'progress',
+    levelRequirement: 67,
+    description: '增加進度（效率 200%），觀察後成功率 100%',
+  },
+  {
+    id: 'focused_touch',
+    name: 'Focused Touch',
+    nameZh: '注視加工',
+    cpCost: 18,
+    durabilityCost: 10,
+    successRate: 50,
+    category: 'quality',
+    levelRequirement: 68,
+    description: '增加品質（效率 150%），觀察後成功率 100%',
+  },
+  {
+    id: 'final_appraisal',
+    name: 'Final Appraisal',
+    nameZh: '最終確認',
+    cpCost: 1,
+    durabilityCost: 0,
+    successRate: 100,
+    category: 'buff',
+    levelRequirement: 42,
+    description: '接下來 5 回合內，進度不會超過配方難度',
+  },
+  {
+    id: 'heart_and_soul',
+    name: 'Heart and Soul',
+    nameZh: '能工巧匠圖紙',
+    cpCost: 0,
+    durabilityCost: 0,
+    successRate: 100,
+    category: 'buff',
+    levelRequirement: 86,
+    description: '使需要高品質狀態的技能可以在任意狀態使用（限用一次）',
+  },
+  {
+    id: 'careful_observation',
+    name: 'Careful Observation',
+    nameZh: '設計變更',
+    cpCost: 0,
+    durabilityCost: 0,
+    successRate: 100,
+    category: 'buff',
+    levelRequirement: 55,
+    description: '重新產生製作狀態（限用 3 次）',
+  },
+  {
+    id: 'quick_innovation',
+    name: 'Quick Innovation',
+    nameZh: '快速改革',
+    cpCost: 0,
+    durabilityCost: 0,
+    successRate: 100,
+    category: 'buff',
+    levelRequirement: 96,
+    description: '獲得 1 回合的改革效果（限用一次）',
+  },
+  {
+    id: 'trained_perfection',
+    name: 'Trained Perfection',
+    nameZh: '一心不亂',
+    cpCost: 0,
+    durabilityCost: 0,
+    successRate: 100,
+    category: 'buff',
+    levelRequirement: 100,
+    description: '下一個技能不消耗耐久（限用一次）',
+  },
+  {
+    id: 'immaculate_mend',
+    name: 'Immaculate Mend',
+    nameZh: '完美精修',
+    cpCost: 112,
+    durabilityCost: 0,
+    successRate: 100,
+    category: 'durability',
+    levelRequirement: 98,
+    description: '將耐久度恢復至最大值',
+  },
+  {
+    id: 'stellar_steady_hand',
+    name: 'Stellar Steady Hand',
+    nameZh: '星極堅手',
+    cpCost: 0,
+    durabilityCost: 0,
+    successRate: 100,
+    category: 'buff',
+    levelRequirement: 100,
+    description: '提升成功率相關的特殊效果（星極專用）',
+  },
+  {
+    id: 'tricks_of_the_trade',
+    name: 'Tricks of the Trade',
+    nameZh: '秘訣',
+    cpCost: 0,
+    durabilityCost: 0,
+    successRate: 100,
+    category: 'buff',
+    levelRequirement: 13,
+    description: '恢復 20 CP，僅在高品質狀態可用',
   },
 ];
 

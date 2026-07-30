@@ -57,6 +57,7 @@ export interface WasmBuffs {
   innovation: number;
   veneration: number;
   waste_not: number;
+  wast_not_ii: number;
   manipulation: number;
   heart_and_soul: 'Unused' | 'Active' | 'Used';
   quick_innovation_used: boolean;
@@ -65,6 +66,7 @@ export interface WasmBuffs {
   advanced_touch_combo: boolean;
   basic_touch_combo: boolean;
   observed: boolean;
+  stellar_steady_hand_left: number;
 }
 
 /**
@@ -95,7 +97,8 @@ export type WasmCondition =
   | 'Pliant'
   | 'Malleable'
   | 'Primed'
-  | 'GoodOmen';
+  | 'GoodOmen'
+  | 'Robust';
 
 /**
  * 技能 ID（與 WASM 相同的命名）
@@ -137,6 +140,8 @@ export type WasmAction =
   | 'quick_innovation'
   | 'trained_eye'
   | 'heart_and_soul'
+  | 'careful_observation'
+  | 'stellar_steady_hand'
   // 失敗版本（用於模擬）
   | 'rapid_synthesis_fail'
   | 'hasty_touch_fail'
