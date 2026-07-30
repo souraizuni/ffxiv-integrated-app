@@ -205,15 +205,45 @@ async function getCachedRecipe(itemId: number): Promise<Recipe | null> {
 
 /**
  * 取得快取的物品
+ *
+ * 這裡刻意不讓例外往外拋：材料樹是 Promise.all 遞歸建構的，
+ * 只要任何一個節點的物品查詢失敗，整棵樹的 Promise 就會 reject，
+ * 呼叫端收到的是 null，畫面上「材料樹 / 所需材料」會整塊消失。
+ * 改為回傳降級的最小物件，讓清單至少能顯示出數量與結構。
  */
 async function getCachedItem(itemId: number): Promise<Item> {
   if (itemCache.has(itemId)) {
     return itemCache.get(itemId)!;
   }
 
-  const item = await fetchItem(itemId);
-  itemCache.set(itemId, item);
-  return item;
+  try {
+    const item = await fetchItem(itemId);
+    itemCache.set(itemId, item);
+    return item;
+  } catch (error) {
+    console.warn(`[material-tree] 取得物品 ${itemId} 失敗，使用預留位置:`, error);
+    return createPlaceholderItem(itemId);
+  }
+}
+
+/**
+ * 物品資料完全取不到時的預留位置（不寫入快取，下次仍會重試）
+ */
+function createPlaceholderItem(itemId: number): Item {
+  return {
+    id: itemId,
+    name: `物品 #${itemId}`,
+    name_en: `Item #${itemId}`,
+    name_ja: '',
+    name_zh: '',
+    icon: '',
+    iconUrl: '',
+    itemLevel: 1,
+    stackSize: 1,
+    isUntradable: false,
+    categoryId: 0,
+    categoryName: '',
+  };
 }
 
 /**

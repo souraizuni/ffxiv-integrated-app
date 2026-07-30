@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import useSWR from 'swr';
 import {
   SOURCE_CATEGORIES,
   PATCH_VERSIONS,
@@ -8,37 +9,42 @@ import {
   getIconUrl,
   passesFilters,
   createDefaultFilterState,
-  type CollectionsData,
   type CollectionItem,
   type FilterState,
 } from '@/lib/collection/filters';
 import { useAuth } from '@/hooks/use-auth';
 import { useFirestoreCollection } from '@/hooks/use-firestore';
-import { withBasePath } from '@/lib/utils/base-path';
+import {
+  getCollectionIndex,
+  getCollection,
+  type CollectionSummary,
+} from '@/lib/data/collections';
 
 // 每頁顯示數量
 const PAGE_SIZE = 100;
 
-// 載入收集資料
-async function loadCollectionsData(): Promise<CollectionsData | null> {
-  try {
-    const response = await fetch(withBasePath('/data/collections_data.json'));
-    if (!response.ok) throw new Error('Failed to load collections data');
-    return await response.json();
-  } catch (error) {
-    console.error('載入收集資料失敗:', error);
-    return null;
-  }
-}
-
 export default function CollectionPage() {
-  // 資料狀態
-  const [collectionsData, setCollectionsData] = useState<CollectionsData | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  
   // 當前選擇的收集類型
   const [currentCollection, setCurrentCollection] = useState<string>('Mounts');
-  
+
+  // 收集類型索引很小（約 700 B），一開始就載入
+  const { data: indexData, isLoading } = useSWR('collection-index', getCollectionIndex, {
+    revalidateOnFocus: false,
+  });
+  const collectionIndex: CollectionSummary[] = useMemo(
+    () => indexData?.collections ?? [],
+    [indexData]
+  );
+
+  const currentSlug = collectionIndex.find((c) => c.name === currentCollection)?.slug;
+
+  // 只載入目前選取的分頁。SWR 會保留已載入過的分頁，切回去時不再重抓。
+  const { data: currentCollectionData, isLoading: isSwitching } = useSWR(
+    currentSlug ? ['collection', currentSlug] : null,
+    ([, slug]: [string, string]) => getCollection(slug),
+    { revalidateOnFocus: false, keepPreviousData: false }
+  );
+
   // 篩選狀態
   const [filterState, setFilterState] = useState<FilterState>(createDefaultFilterState());
   
@@ -61,28 +67,17 @@ export default function CollectionPage() {
   const { user, isLoggedIn, login, logout, isConfigured } = useAuth();
   const { cloudData, saveToCloud, isLoading: isSyncing } = useFirestoreCollection(user);
 
-  // 載入資料
-  useEffect(() => {
-    loadCollectionsData().then((data) => {
-      setCollectionsData(data);
-      setIsLoading(false);
-    });
-  }, []);
-
   // 載入本地儲存的擁有項目
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (collectionIndex.length === 0) return;
 
     // 載入擁有項目
     const storedOwned: Record<string, Set<number>> = {};
-    collectionsData?.Collections.forEach((collection) => {
-      const key = `ffxiv-owned-${collection.CollectionName}`;
+    collectionIndex.forEach((collection) => {
+      const key = `ffxiv-owned-${collection.name}`;
       const data = localStorage.getItem(key);
-      if (data) {
-        storedOwned[collection.CollectionName] = new Set(JSON.parse(data));
-      } else {
-        storedOwned[collection.CollectionName] = new Set();
-      }
+      storedOwned[collection.name] = data ? new Set(JSON.parse(data)) : new Set();
     });
     setOwnedItems(storedOwned);
 
@@ -91,7 +86,7 @@ export default function CollectionPage() {
     if (wishlistData) {
       setWishlist(new Set(JSON.parse(wishlistData)));
     }
-  }, [collectionsData]);
+  }, [collectionIndex]);
 
   // 當使用者登入時，從雲端載入資料
   useEffect(() => {
@@ -109,11 +104,6 @@ export default function CollectionPage() {
       }
     }
   }, [user, cloudData]);
-
-  // 當前收集類型的資料
-  const currentCollectionData = useMemo(() => {
-    return collectionsData?.Collections.find((c) => c.CollectionName === currentCollection);
-  }, [collectionsData, currentCollection]);
 
   // 篩選後的項目
   const filteredItems = useMemo(() => {
@@ -330,17 +320,18 @@ export default function CollectionPage() {
       <nav className="bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex gap-1 py-2">
-            {collectionsData?.Collections.map((collection) => (
+            {collectionIndex.map((collection) => (
               <button
-                key={collection.CollectionName}
-                onClick={() => setCurrentCollection(collection.CollectionName)}
+                key={collection.name}
+                onClick={() => setCurrentCollection(collection.name)}
                 className={`px-4 py-2 rounded-lg whitespace-nowrap transition-colors ${
-                  currentCollection === collection.CollectionName
+                  currentCollection === collection.name
                     ? 'bg-blue-500 text-white'
                     : 'bg-white dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600'
                 }`}
               >
-                {collection.DisplayName || COLLECTION_NAMES[collection.CollectionName] || collection.CollectionName}
+                {COLLECTION_NAMES[collection.name] || collection.name}
+                <span className="ml-1.5 text-xs opacity-60">{collection.count}</span>
               </button>
             ))}
           </div>
@@ -451,7 +442,12 @@ export default function CollectionPage() {
             </div>
 
             {/* 物品格子 */}
-            {filteredItems.length === 0 ? (
+            {isSwitching && filteredItems.length === 0 ? (
+              <div className="text-center py-12 text-gray-500">
+                <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-3" />
+                <p>載入 {COLLECTION_NAMES[currentCollection] || currentCollection} 中…</p>
+              </div>
+            ) : filteredItems.length === 0 ? (
               <div className="text-center py-12 text-gray-500">
                 <p>找不到符合條件的收藏品</p>
                 <p className="text-sm mt-2">嘗試調整篩選條件或搜尋關鍵字</p>

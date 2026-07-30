@@ -1,553 +1,176 @@
 // ============================================
-// XIVAPI v2 + Cafemaker 資料請求 Hooks
-// 支援英文 (XIVAPI v2) 和中文 (Cafemaker) 搜尋
-// 顯示使用繁體中文 (tw-items.json)
+// 物品 / 配方資料 Hooks
 // ============================================
+// 資料來源沿革：
+//   舊：Cafemaker（cafemaker.wakingsands.com）—— 已停止服務，固定回 HTTP 530 /
+//       Cloudflare error 1016。因為 fetchItem 只走這個來源、失敗即 throw，
+//       而材料樹是 Promise.all 遞歸建構的（任一節點拋錯整棵樹就 reject），
+//       症狀是「材料樹」與「所需材料」兩個區塊同時整塊消失。
+//   現在：本地 msgpack 資料庫（public/data/*.msgpack，由 npm run build-data 產生），
+//       完全不需網路往返；XIVAPI v2 僅作為本地資料尚未涵蓋時的備援。
 
 import useSWR from 'swr';
-import type {
-  Item,
-  Recipe,
-  RecipeIngredient,
-} from '@/types';
-import { getItemNameTwOrFallback, simplifiedToTw } from '@/lib/i18n/tw-translation';
+import type { Item, Recipe } from '@/types';
+import {
+  getItem as getLocalItem,
+  getItems as getLocalItems,
+  searchItems as searchLocalItems,
+  type GameItem,
+} from '@/lib/data/items';
+import { getRecipeByItemId as getLocalRecipeByItemId } from '@/lib/data/recipes';
+import { getItemRow, getItemIconUrl } from '@/lib/xivapi-v2';
+import { getRecipeByItemId as getRemoteRecipeByItemId } from '@/lib/recipe-datasource';
 
-// API 端點
-const XIVAPI_V2_BASE = 'https://v2.xivapi.com/api';
-const CAFEMAKER_BASE = 'https://cafemaker.wakingsands.com';
-
-// ---- 檢測文字是否包含中文 ----
-function containsChinese(text: string): boolean {
-  return /[\u4e00-\u9fa5]/.test(text);
+/** 把本地資料庫的 GameItem 轉成專案既有的 Item 型別 */
+function toItem(game: GameItem): Item {
+  return {
+    id: game.id,
+    name: game.name,
+    name_en: game.nameEn,
+    name_ja: game.nameEn,
+    name_zh: game.nameTw || game.nameEn,
+    icon: String(game.iconId),
+    iconUrl: game.iconUrl,
+    description: '',
+    itemLevel: game.itemLevel,
+    stackSize: game.stackSize,
+    isUntradable: game.isUntradable,
+    // 求解器設定彈窗依賴這個欄位決定哪些材料可以勾 HQ，缺了會讓可 HQ 材料無法選取
+    canBeHQ: game.canBeHQ,
+    categoryId: game.categoryId,
+    categoryName: game.categoryName,
+  };
 }
 
-// ---- 繁體轉簡體映射表（常用 FFXIV 相關詞彙）----
-const traditionalToSimplified: Record<string, string> = {
-  // 金屬材料
-  '鐵': '铁', '銅': '铜', '銀': '银', '鋼': '钢', '錠': '锭', '礦': '矿',
-  '鋁': '铝', '鎳': '镍', '鋅': '锌', '錫': '锡', '鉛': '铅', '鈦': '钛',
-  '鎢': '钨', '鉻': '铬', '鉑': '铂', '鑽': '钻', '鋒': '锋', '鏈': '链',
-  // 布料/皮革
-  '絲': '丝', '緞': '缎', '線': '线', '織': '织', '紗': '纱',
-  '縫': '缝', '綿': '绵', '繡': '绣', '編': '编', '紋': '纹',
-  // 木材
-  '樹': '树', '葉': '叶', '楓': '枫', '櫻': '樱', '檜': '桧',
-  '樺': '桦', '楊': '杨',
-  // 裝備
-  '劍': '剑', '槍': '枪', '環': '环', '鐲': '镯', '飾': '饰',
-  '鎧': '铠',
-  // 職業
-  '鍛': '锻', '煉': '炼', '調': '调', '製': '制',
-  // 動作/狀態
-  '強': '强', '進': '进', '開': '开', '關': '关', '點': '点', '發': '发',
-  '頭': '头', '變': '变', '遠': '远', '極': '极', '術': '术', '戰': '战',
-  '護': '护', '衛': '卫', '擊': '击',
-  // 常用字
-  '與': '与', '個': '个', '無': '无', '為': '为', '這': '这', '從': '从',
-  '時': '时', '過': '过', '對': '对', '後': '后', '還': '还',
-  '長': '长', '當': '当', '實': '实', '現': '现', '將': '将', '種': '种',
-  '動': '动', '機': '机', '電': '电', '業': '业', '數': '数', '問': '问',
-  '學': '学', '國': '国', '產': '产', '見': '见', '經': '经', '話': '话',
-  '說': '说', '間': '间', '給': '给', '來': '来', '東': '东', '風': '风',
-  '書': '书', '龍': '龙', '馬': '马', '魚': '鱼', '鳥': '鸟', '雞': '鸡',
-  '貓': '猫', '獸': '兽', '蟲': '虫', '藥': '药', '獵': '猎', '飛': '飞',
-  '華': '华', '萬': '万', '億': '亿', '寶': '宝', '靈': '灵', '聖': '圣',
-  '亞': '亚', '區': '区', '圖': '图', '場': '场', '貝': '贝', '財': '财',
-  '買': '买', '賣': '卖', '價': '价', '貨': '货', '質': '质', '費': '费',
-  '紅': '红', '綠': '绿', '藍': '蓝', '黃': '黄',
-  // FFXIV 特殊詞彙
-  '歐': '欧', '澤': '泽', '陸': '陆', '傳': '传',
-};
-
-// ---- 繁體轉簡體 ----
-function toSimplified(text: string): string {
-  let result = text;
-  for (const [trad, simp] of Object.entries(traditionalToSimplified)) {
-    result = result.replaceAll(trad, simp);
-  }
-  return result;
-}
-
-// ---- Fetcher 函式 ----
-async function fetcher<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`API 請求失敗: ${res.status}`);
-  }
-  return res.json();
-}
-
-// ---- 取得圖示 URL ----
-function getIconUrl(iconPath: string): string {
-  if (iconPath.startsWith('/i/')) {
-    // Cafemaker 格式
-    return `${CAFEMAKER_BASE}${iconPath}`;
-  }
-  // XIVAPI v2 格式
-  return `${XIVAPI_V2_BASE}/asset?path=${encodeURIComponent(iconPath)}&format=png`;
+/** 本地與線上都查不到時的降級物件（見 fetchItem 說明：絕不拋錯） */
+function placeholderItem(itemId: number): Item {
+  return {
+    id: itemId,
+    name: `物品 #${itemId}`,
+    name_en: `Item #${itemId}`,
+    name_ja: '',
+    name_zh: '',
+    icon: '',
+    iconUrl: '',
+    description: '',
+    itemLevel: 1,
+    stackSize: 1,
+    isUntradable: false,
+    canBeHQ: false,
+    categoryId: 0,
+    categoryName: '',
+  };
 }
 
 // ---- 物品資料 ----
 export function useItem(itemId: number | null) {
-  // 使用 Cafemaker 獲取物品（支援中文名稱）
-  const { data, error, isLoading } = useSWR<CafemakerItemResponse>(
-    itemId ? `${CAFEMAKER_BASE}/Item/${itemId}?columns=ID,Name,Name_en,Name_ja,Icon,Description,LevelItem,StackSize,IsUntradable,ItemUICategory.ID,ItemUICategory.Name` : null,
-    fetcher,
-    {
-      revalidateOnFocus: false,
-      dedupingInterval: 60000,
-    }
+  const { data, error, isLoading } = useSWR<Item | null>(
+    itemId ? ['item', itemId] : null,
+    async () => (itemId ? fetchItem(itemId) : null),
+    { revalidateOnFocus: false, dedupingInterval: 60000 }
   );
 
-  const item: Item | null = data
-    ? {
-        id: data.ID,
-        // 優先使用繁體中文翻譯，否則將簡體轉繁體
-        name: getItemNameTwOrFallback(data.ID, simplifiedToTw(data.Name)),
-        name_en: data.Name_en || data.Name,
-        name_ja: data.Name_ja || data.Name,
-        name_zh: data.Name,
-        icon: data.Icon || '',
-        iconUrl: data.Icon ? getIconUrl(data.Icon) : '',
-        description: data.Description || '',
-        itemLevel: data.LevelItem || 1,
-        stackSize: data.StackSize || 1,
-        isUntradable: data.IsUntradable === 1,
-        categoryId: data.ItemUICategory?.ID || 0,
-        categoryName: data.ItemUICategory?.Name || '',
-      }
-    : null;
-
-  return {
-    item,
-    isLoading,
-    error,
-  };
+  return { item: data ?? null, isLoading, error };
 }
 
 // ---- 配方資料 ----
 export function useRecipe(itemId: number | null) {
-  // 使用 XIVAPI v2 搜尋配方（Cafemaker search API 索引不完整）
-  // 查詢語法: +ItemResult=<itemId>
-  const xivapiSearchUrl = itemId
-    ? `${XIVAPI_V2_BASE}/search?query=${encodeURIComponent(`+ItemResult=${itemId}`)}&sheets=Recipe&fields=ItemResult.Name`
-    : null;
-
-  const { data: xivapiSearchData, error: xivapiSearchError } = useSWR(
-    xivapiSearchUrl,
-    fetcher,
+  const { data, error, isLoading } = useSWR<Recipe | null>(
+    itemId ? ['recipe', itemId] : null,
+    async () => (itemId ? fetchRecipe(itemId) : null),
     { revalidateOnFocus: false }
   );
 
-  // 從 XIVAPI v2 結果取得配方 ID
-  const xivapiRecipeId = (xivapiSearchData as XivApiV2SearchResponse)?.results?.[0]?.row_id;
-
-  // 備援: 使用 Cafemaker 搜尋
-  const cafemakerSearchUrl = itemId && !xivapiRecipeId
-    ? `${CAFEMAKER_BASE}/search?indexes=Recipe&filters=ItemResult.ID=${itemId}&columns=ID`
-    : null;
-
-  const { data: cafemakerSearchData, error: cafemakerSearchError } = useSWR<CafemakerSearchResponse>(
-    cafemakerSearchUrl,
-    fetcher,
-    { revalidateOnFocus: false }
-  );
-
-  const recipeId = xivapiRecipeId || cafemakerSearchData?.Results?.[0]?.ID;
-
-  // 獲取完整配方（從 Cafemaker 取得中文資料）
-  const { data: recipeData, error: recipeError, isLoading } = useSWR<CafemakerRecipeResponse>(
-    recipeId ? `${CAFEMAKER_BASE}/Recipe/${recipeId}` : null,
-    fetcher,
-    { revalidateOnFocus: false }
-  );
-
-  const recipe: Recipe | null = recipeData
-    ? parseCafemakerRecipe(recipeData)
-    : null;
-
-  return {
-    recipe,
-    isLoading,
-    error: xivapiSearchError || cafemakerSearchError || recipeError,
-  };
+  return { recipe: data ?? null, isLoading, error };
 }
 
-// ---- 搜尋物品（自動判斷中英文）----
+// ---- 搜尋物品 ----
 export function useItemSearch(query: string, limit: number = 20) {
-  const isChinese = containsChinese(query);
-  // 繁體轉簡體（Cafemaker 使用簡體中文）
-  const searchQuery = isChinese ? toSimplified(query) : query;
-  
-  // 中文使用 Cafemaker，英文使用 XIVAPI v2
-  const searchUrl = query.length >= (isChinese ? 1 : 2)
-    ? isChinese
-      ? `${CAFEMAKER_BASE}/search?string=${encodeURIComponent(searchQuery)}&indexes=Item&limit=${limit}&columns=ID,Name,Name_en,Icon,LevelItem,ItemUICategory.Name`
-      : `${XIVAPI_V2_BASE}/search?query=Name~%22${encodeURIComponent(query)}%22&sheets=Item&fields=Name,Icon,LevelItem,ItemUICategory.Name&limit=${limit}`
-    : null;
+  // 本地索引夠快，一個字就能查，不必再區分中英文最小長度
+  const shouldSearch = query.trim().length >= 1;
 
-  const { data, error, isLoading } = useSWR(
-    searchUrl,
-    fetcher,
-    {
-      revalidateOnFocus: false,
-      dedupingInterval: 5000,
-    }
+  const { data, error, isLoading } = useSWR<Item[]>(
+    shouldSearch ? ['item-search', query, limit] : null,
+    async () => searchItems(query, limit),
+    { revalidateOnFocus: false, dedupingInterval: 5000, keepPreviousData: true }
   );
 
-  let items: Item[] = [];
-
-  if (isChinese && data) {
-    // Cafemaker 回應格式
-    const cafemakerData = data as CafemakerSearchResponse;
-    items = (cafemakerData.Results || []).map((r) => ({
-      id: r.ID,
-      // 優先使用繁體中文翻譯，否則將簡體轉繁體
-      name: getItemNameTwOrFallback(r.ID, simplifiedToTw(r.Name || '')),
-      name_en: r.Name_en || r.Name || '',
-      name_ja: r.Name || '',
-      name_zh: r.Name || '',
-      icon: r.Icon || '',
-      iconUrl: r.Icon ? getIconUrl(r.Icon) : '',
-      itemLevel: r.LevelItem || 1,
-      stackSize: 1,
-      isUntradable: false,
-      categoryId: 0,
-      categoryName: r.ItemUICategory?.Name || '',
-    }));
-  } else if (data) {
-    // XIVAPI v2 回應格式
-    const xivapiData = data as XivApiV2SearchResponse;
-    items = (xivapiData.results || []).map((r) => {
-      const fields = r.fields as XivApiV2ItemFields;
-      return {
-        id: r.row_id,
-        name: fields.Name || '',
-        name_en: fields.Name || '',
-        name_ja: fields.Name || '',
-        name_zh: fields.Name || '',
-        icon: fields.Icon?.path || '',
-        iconUrl: fields.Icon?.path_hr1
-          ? `${XIVAPI_V2_BASE}/asset?path=${encodeURIComponent(fields.Icon.path_hr1)}&format=png`
-          : fields.Icon?.path
-            ? `${XIVAPI_V2_BASE}/asset?path=${encodeURIComponent(fields.Icon.path)}&format=png`
-            : '',
-        itemLevel: typeof fields.LevelItem === 'object' && fields.LevelItem !== null
-          ? (fields.LevelItem as { value: number }).value
-          : (fields.LevelItem as number) || 1,
-        stackSize: 1,
-        isUntradable: false,
-        categoryId: fields.ItemUICategory?.row_id || 0,
-        categoryName: fields.ItemUICategory?.fields?.Name || '',
-      };
-    });
-  }
-
-  return {
-    items,
-    isLoading,
-    error,
-  };
+  return { items: data || [], isLoading, error };
 }
 
-// ---- 獨立的 Fetch 函式（供 server-side 使用）----
+/** 搜尋物品（中英文皆走本地索引，完全離線） */
+export async function searchItems(query: string, limit: number = 20): Promise<Item[]> {
+  const hits = await searchLocalItems(query, { limit });
+  return hits.map(toItem);
+}
+
+// ---- 獨立的 Fetch 函式 ----
+
+/**
+ * 取得單一物品。
+ *
+ * 刻意不拋錯：材料樹是 Promise.all 遞歸建構的，任一節點拋錯會讓整棵樹 reject，
+ * 使用者看到的是「材料清單整塊消失」—— 這正是 Cafemaker 停止服務時發生的事。
+ */
 export async function fetchItem(itemId: number): Promise<Item> {
-  const res = await fetch(
-    `${CAFEMAKER_BASE}/Item/${itemId}?columns=ID,Name,Name_en,Name_ja,Icon,Description,LevelItem,StackSize,IsUntradable,ItemUICategory.ID,ItemUICategory.Name`
-  );
-  if (!res.ok) {
-    throw new Error(`無法獲取物品 ${itemId}`);
-  }
-  const data: CafemakerItemResponse = await res.json();
-
-  return {
-    id: data.ID,
-    // 優先使用繁體中文翻譯，否則將簡體轉繁體
-    name: getItemNameTwOrFallback(data.ID, simplifiedToTw(data.Name)),
-    name_en: data.Name_en || data.Name,
-    name_ja: data.Name_ja || data.Name,
-    name_zh: data.Name,
-    icon: data.Icon || '',
-    iconUrl: data.Icon ? getIconUrl(data.Icon) : '',
-    description: data.Description || '',
-    itemLevel: data.LevelItem || 1,
-    stackSize: data.StackSize || 1,
-    isUntradable: data.IsUntradable === 1,
-    categoryId: data.ItemUICategory?.ID || 0,
-    categoryName: data.ItemUICategory?.Name || '',
-  };
-}
-
-export async function fetchRecipe(itemId: number): Promise<Recipe | null> {
-  // 方法 1: 使用 XIVAPI v2 搜尋配方（更可靠）
-  // Cafemaker 的 search API 索引不完整，某些配方搜不到
-  // 查詢語法: +ItemResult=<itemId>
   try {
-    const xivapiSearchRes = await fetch(
-      `${XIVAPI_V2_BASE}/search?query=${encodeURIComponent(`+ItemResult=${itemId}`)}&sheets=Recipe&fields=ItemResult.Name`
-    );
-    
-    if (xivapiSearchRes.ok) {
-      const xivapiData = await xivapiSearchRes.json();
-      if (xivapiData.results && xivapiData.results.length > 0) {
-        const recipeId = xivapiData.results[0].row_id;
-        
-        // 用找到的配方 ID 從 Cafemaker 獲取完整配方資訊（中文名稱）
-        const recipeRes = await fetch(`${CAFEMAKER_BASE}/Recipe/${recipeId}`);
-        if (recipeRes.ok) {
-          const recipeData: CafemakerRecipeResponse = await recipeRes.json();
-          return parseCafemakerRecipe(recipeData);
-        }
-      }
+    const local = await getLocalItem(itemId);
+    if (local) return toItem(local);
+
+    // 本地查不到：可能是資料檔尚未涵蓋的新版本物品，退回線上查詢
+    const row = await getItemRow(itemId);
+    if (row) {
+      return {
+        ...placeholderItem(itemId),
+        name: row.name || `物品 #${itemId}`,
+        name_en: row.name,
+        icon: row.iconPath,
+        iconUrl: getItemIconUrl(row),
+        itemLevel: row.itemLevel,
+        stackSize: row.stackSize,
+        isUntradable: row.isUntradable,
+        categoryId: row.categoryId,
+        categoryName: row.categoryName,
+      };
     }
-  } catch (e) {
-    console.warn('XIVAPI v2 search failed, falling back to Cafemaker:', e);
+  } catch (error) {
+    console.warn(`[use-xivapi] 取得物品 ${itemId} 失敗:`, error);
   }
 
-  // 方法 2: 備援 - 使用 Cafemaker 搜尋
-  const searchRes = await fetch(
-    `${CAFEMAKER_BASE}/search?indexes=Recipe&filters=ItemResult.ID=${itemId}&columns=ID`
-  );
-  if (!searchRes.ok) return null;
-  
-  const searchData: CafemakerSearchResponse = await searchRes.json();
-  const recipeId = searchData.Results?.[0]?.ID;
-  
-  if (!recipeId) return null;
-
-  // 獲取完整配方
-  const recipeRes = await fetch(`${CAFEMAKER_BASE}/Recipe/${recipeId}`);
-  if (!recipeRes.ok) return null;
-
-  const recipeData: CafemakerRecipeResponse = await recipeRes.json();
-  return parseCafemakerRecipe(recipeData);
+  return placeholderItem(itemId);
 }
 
-// ---- 解析 Cafemaker 配方 ----
-function parseCafemakerRecipe(data: CafemakerRecipeResponse): Recipe {
-  const ingredients: RecipeIngredient[] = [];
+/** 批次取得多個物品（材料清單預載用） */
+export async function fetchItems(itemIds: number[]): Promise<Map<number, Item>> {
+  const result = new Map<number, Item>();
 
-  // Cafemaker 使用 ItemIngredient0 到 ItemIngredient9
-  for (let i = 0; i <= 9; i++) {
-    const itemKey = `ItemIngredient${i}` as keyof CafemakerRecipeResponse;
-    const amountKey = `AmountIngredient${i}` as keyof CafemakerRecipeResponse;
-    
-    const item = data[itemKey] as CafemakerIngredientItem | null;
-    const amount = data[amountKey] as number;
-    
-    if (item && item.ID && amount > 0) {
-      // 包含完整的 item 資訊
-      const itemName = item.Name ? simplifiedToTw(item.Name) : `物品 #${item.ID}`;
-      // 判斷是否可以 HQ：優先使用 API 回應的 CanBeHq，否則根據 IsUntradable 判斷
-      const canBeHQ = item.CanBeHq !== undefined ? item.CanBeHq === 1 : item.IsUntradable !== 1;
-      ingredients.push({
-        itemId: item.ID,
-        amount,
-        isHQ: false,
-        item: {
-          id: item.ID,
-          name: itemName,
-          name_en: item.Name_en || item.Name || '',
-          name_ja: item.Name || '',
-          name_zh: itemName,
-          icon: item.Icon || '',
-          iconUrl: item.Icon ? getIconUrl(item.Icon) : '',
-          itemLevel: item.LevelItem || 1,
-          stackSize: 999,
-          isUntradable: item.IsUntradable === 1,
-          canBeHQ,
-          categoryId: 0,
-          categoryName: '',
-        },
-      });
+  try {
+    const locals = await getLocalItems(itemIds);
+    for (const id of itemIds) {
+      const local = locals.get(id);
+      result.set(id, local ? toItem(local) : placeholderItem(id));
     }
+  } catch (error) {
+    console.warn('[use-xivapi] 批次取得物品失敗:', error);
+    for (const id of itemIds) result.set(id, placeholderItem(id));
   }
 
-  // RecipeLevelTable 包含基礎值
-  const baseDifficulty = data.RecipeLevelTable?.Difficulty || 100;
-  const baseDurability = data.RecipeLevelTable?.Durability || 80;
-  const baseQuality = data.RecipeLevelTable?.Quality || 1000;
-
-  // 因子用於計算實際配方值 (預設 100 表示無調整)
-  const difficultyFactor = data.DifficultyFactor ?? 100;
-  const durabilityFactor = data.DurabilityFactor ?? 100;
-  const qualityFactor = data.QualityFactor ?? 100;
-
-  // 計算實際配方值 (基礎值 * 因子 / 100，向下取整)
-  const actualDifficulty = Math.floor((baseDifficulty * difficultyFactor) / 100);
-  const actualDurability = Math.floor((baseDurability * durabilityFactor) / 100);
-  const actualQuality = Math.floor((baseQuality * qualityFactor) / 100);
-
-  return {
-    id: data.ID,
-    itemId: data.ItemResult?.ID || 0,
-    craftType: getCraftJobFromId(data.CraftType?.ID || 0),
-    craftTypeLevel: data.AmountResult || 1,
-    recipeLevel: data.RecipeLevelTable?.ClassJobLevel || 1,
-    // 實際配方值（套用因子後）
-    difficulty: actualDifficulty,
-    durability: actualDurability,
-    quality: actualQuality,
-    requiredCraftsmanship: data.RequiredCraftsmanship || 0,
-    requiredControl: data.RequiredControl || 0,
-    ingredients,
-    canQuickSynth: data.CanQuickSynth === 1,
-    canHQ: data.CanHq === 1,
-    stars: data.RecipeLevelTable?.Stars || 0,
-    // 材料品質係數（用於初期品質計算）
-    materialQualityFactor: data.MaterialQualityFactor || 0,
-    // RecipeLevelTable 的基礎值（用於 WASM 求解器）
-    baseDifficulty,
-    baseDurability,
-    baseQuality,
-    // RecipeLevelTable ID（用於 WASM 求解器）
-    recipeLevelId: data.RecipeLevelTable?.ID || 0,
-    // 配方等級參數（用於 WASM 求解器的精確計算）
-    progressDivider: data.RecipeLevelTable?.ProgressDivider || 100,
-    progressModifier: data.RecipeLevelTable?.ProgressModifier || 100,
-    qualityDivider: data.RecipeLevelTable?.QualityDivider || 100,
-    qualityModifier: data.RecipeLevelTable?.QualityModifier || 100,
-    conditionsFlag: data.RecipeLevelTable?.ConditionsFlag || 15,
-  };
+  return result;
 }
 
-// Cafemaker 材料物品結構
-interface CafemakerIngredientItem {
-  ID: number;
-  Name?: string;
-  Name_en?: string;
-  Icon?: string;
-  LevelItem?: number;
-  IsUntradable?: number;
-  CanBeHq?: number;
-}
-
-// ---- 工具函式 ----
-function getCraftJobFromId(id: number): import('@/types').CraftJob {
-  const jobs: import('@/types').CraftJob[] = [
-    'CRP', 'BSM', 'ARM', 'GSM', 'LTW', 'WVR', 'ALC', 'CUL'
-  ];
-  return jobs[id] || 'CRP';
-}
-
-// ---- Cafemaker 回應類型 ----
-interface CafemakerItemResponse {
-  ID: number;
-  Name: string;
-  Name_en?: string;
-  Name_ja?: string;
-  Icon?: string;
-  Description?: string;
-  LevelItem?: number;
-  StackSize?: number;
-  IsUntradable?: number;
-  ItemUICategory?: {
-    ID: number;
-    Name: string;
-  };
-}
-
-interface CafemakerSearchResponse {
-  Pagination?: {
-    Page: number;
-    ResultsTotal: number;
-  };
-  Results: Array<{
-    ID: number;
-    Name?: string;
-    Name_en?: string;
-    Icon?: string;
-    LevelItem?: number;
-    ItemUICategory?: {
-      Name: string;
-    };
-  }>;
-}
-
-interface CafemakerRecipeResponse {
-  ID: number;
-  ItemResult?: { ID: number };
-  CraftType?: { ID: number };
-  AmountResult?: number;
-  RecipeLevelTable?: {
-    ID: number;  // RecipeLevelTable 的 ID（用於 WASM）
-    ClassJobLevel: number;
-    Difficulty: number;
-    Durability: number;
-    Quality: number;
-    Stars: number;
-    ProgressDivider: number;
-    ProgressModifier: number;
-    QualityDivider: number;
-    QualityModifier: number;
-    ConditionsFlag: number;
-    SuggestedCraftsmanship?: number;
-    SuggestedControl?: number;
-  };
-  // 因子欄位 - 用於計算實際配方值
-  DifficultyFactor?: number;
-  DurabilityFactor?: number;
-  QualityFactor?: number;
-  MaterialQualityFactor?: number;
-  RequiredCraftsmanship?: number;
-  RequiredControl?: number;
-  CanQuickSynth?: number;
-  CanHq?: number;
-  ItemIngredient0?: CafemakerIngredientItem | null;
-  ItemIngredient1?: CafemakerIngredientItem | null;
-  ItemIngredient2?: CafemakerIngredientItem | null;
-  ItemIngredient3?: CafemakerIngredientItem | null;
-  ItemIngredient4?: CafemakerIngredientItem | null;
-  ItemIngredient5?: CafemakerIngredientItem | null;
-  ItemIngredient6?: CafemakerIngredientItem | null;
-  ItemIngredient7?: CafemakerIngredientItem | null;
-  ItemIngredient8?: CafemakerIngredientItem | null;
-  ItemIngredient9?: CafemakerIngredientItem | null;
-  AmountIngredient0?: number;
-  AmountIngredient1?: number;
-  AmountIngredient2?: number;
-  AmountIngredient3?: number;
-  AmountIngredient4?: number;
-  AmountIngredient5?: number;
-  AmountIngredient6?: number;
-  AmountIngredient7?: number;
-  AmountIngredient8?: number;
-  AmountIngredient9?: number;
-}
-
-// ---- XIVAPI v2 回應類型 ----
-interface XivApiV2SearchResponse {
-  next?: string;
-  schema: string;
-  version: string;
-  results: XivApiV2SearchResult[];
-}
-
-interface XivApiV2SearchResult {
-  score: number;
-  sheet: string;
-  row_id: number;
-  fields: Record<string, unknown>;
-}
-
-// 用於搜尋結果的物品欄位型別
-interface XivApiV2ItemFields {
-  Name?: string;
-  Description?: string;
-  Icon?: {
-    id: number;
-    path: string;
-    path_hr1: string;
-  };
-  LevelItem?: number | { value: number };
-  StackSize?: number;
-  IsUntradable?: boolean;
-  ItemUICategory?: {
-    value: number;
-    sheet: string;
-    row_id: number;
-    fields?: {
-      Name: string;
-    };
-  };
+/**
+ * 依成品物品 ID 取得配方。
+ *
+ * 本地資料庫是完整的，因此「查無此配方」是確定的答案（該物品就是採集／掉落物），
+ * 必須直接回 null。若改成查無就打線上 API，材料樹裡每一個基礎材料都會產生
+ * 一次網路請求 —— 那正是本地化想消除的成本。
+ * 只有資料檔本身載入失敗時才退回線上查詢。
+ */
+export async function fetchRecipe(itemId: number): Promise<Recipe | null> {
+  try {
+    return await getLocalRecipeByItemId(itemId);
+  } catch (error) {
+    console.warn(`[use-xivapi] 本地配方資料載入失敗 (item ${itemId})，改用線上查詢:`, error);
+    return getRemoteRecipeByItemId(itemId);
+  }
 }

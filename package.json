@@ -6,7 +6,15 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "build-data": "node scripts/build-data/build-all.mjs",
+    "build-data:recipes": "node scripts/build-data/build-recipes.mjs",
+    "build-data:items": "node scripts/build-data/build-items.mjs",
+    "build-data:sources": "node scripts/build-data/build-sources.mjs",
+    "build-data:collections": "node scripts/build-data/build-collections.mjs"
   },
   "dependencies": {
     "@types/js-cookie": "^3.0.6",
@@ -17,7 +25,8 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "swr": "^2.3.8",
-    "zustand": "^5.0.9"
+    "zustand": "^5.0.9",
+    "@msgpack/msgpack": "^3.1.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -27,6 +36,8 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10",
+    "@vitest/coverage-v8": "^4.1.10"
   }
 }

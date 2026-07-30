@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 編輯備份檔（PreToolUse hook 產生）
+*.bak

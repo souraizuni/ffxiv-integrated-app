@@ -2,9 +2,7 @@
 // 物品來源資訊 API - 整合 Teamcraft 資料
 // ============================================
 
-import nodesData from '@/data/nodes.json';
-import npcsData from '@/data/npcs.json';
-import placesZh from '@/data/places-zh.json';
+import { loadPack } from '@/lib/data/msgpack-loader';
 import { simplifiedToTw } from '@/lib/i18n/tw-translation';
 
 // 類型定義
@@ -47,9 +45,60 @@ interface NpcData {
   };
 }
 
-const nodes = nodesData as unknown as Record<string, NodeData>;
-const npcs = npcsData as unknown as Record<string, NpcData>;
-const placesZhMap = placesZh as unknown as Record<string, string | number>;
+// ---- 資料按需載入 ----
+// 這三份資料原本是 import 進來的靜態 JSON（npcs.json 就有 16.9 MB），
+// 會被整包打進 JS bundle，讓 /crafting 的主 chunk 膨脹到 12.3 MB。
+// 改成只有真的要查「取得方式」時才載入 public/data 下的 msgpack。
+
+interface SourcesPack {
+  nodes: Record<string, NodeData>;
+  placesZh: Record<string, string | number>;
+  mapEntries: unknown[];
+}
+
+interface NpcsPack {
+  npcs: Record<string, NpcData>;
+}
+
+let nodes: Record<string, NodeData> = {};
+let npcs: Record<string, NpcData> = {};
+let placesZhMap: Record<string, string | number> = {};
+
+let dataPromise: Promise<void> | null = null;
+
+/**
+ * 確保來源資料已載入。
+ * 併發呼叫共用同一個 promise；失敗時清掉 promise 讓下次可以重試。
+ */
+function ensureSourceData(): Promise<void> {
+  if (!dataPromise) {
+    dataPromise = Promise.all([
+      loadPack<SourcesPack>('sources.msgpack'),
+      loadPack<NpcsPack>('npcs.msgpack'),
+    ])
+      .then(([sources, npcsPack]) => {
+        nodes = sources.nodes || {};
+        placesZhMap = sources.placesZh || {};
+        npcs = npcsPack.npcs || {};
+      })
+      .catch((error) => {
+        dataPromise = null;
+        throw error;
+      });
+  }
+
+  return dataPromise;
+}
+
+/** 來源資料是否已可用（同步 API 在未載入時只能回傳降級結果） */
+export function isSourceDataReady(): boolean {
+  return Object.keys(nodes).length > 0;
+}
+
+/** 主動預載來源資料（例如頁面閒置時） */
+export function preloadSourceData(): Promise<void> {
+  return ensureSourceData();
+}
 
 // 快取
 const GARLAND_API_BASE = 'https://garlandtools.org/db/doc';
@@ -228,6 +277,14 @@ export async function getItemSources(itemId: number): Promise<ItemSourceInfo | n
   const cached = itemSourceCache.get(itemId);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return cached.data;
+  }
+
+  // 座標與 NPC 資料是按需載入的，這裡確保後續的同步查詢拿得到資料。
+  // 載入失敗不阻斷主流程：Garland 的來源清單仍可顯示，只是少了座標。
+  try {
+    await ensureSourceData();
+  } catch (error) {
+    console.warn('[item-sources] 載入本地座標資料失敗，將只顯示不含座標的來源:', error);
   }
 
   try {

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Navigation } from "@/components/navigation";
+import { ErrorBoundary } from "@/components/error-boundary";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -31,7 +32,7 @@ export default function RootLayout({
       >
         <Navigation />
         <main className="min-h-screen">
-          {children}
+          <ErrorBoundary label="頁面">{children}</ErrorBoundary>
         </main>
       </body>
     </html>
