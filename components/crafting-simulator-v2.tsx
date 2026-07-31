@@ -47,46 +47,17 @@ function saveSolverOptionsToCookie(options: RaphaelSolverOptions) {
 }
 
 // 技能名稱映射
-const ACTION_NAMES: Record<string, string> = {
-  'basic_synthesis': '製作',
-  'basic_touch': '加工',
-  'masters_mend': '精修',
-  'hasty_touch': '倉促加工',
-  'rapid_synthesis': '高速製作',
-  'observe': '觀察',
-  'tricks_of_the_trade': '秘訣',
-  'standard_touch': '中級加工',
-  'great_strides': '闊步',
-  'innovation': '改革',
-  'veneration': '崇敬',
-  'muscle_memory': '堅信',
-  'careful_synthesis': '模範製作',
-  'manipulation': '掌控',
-  'prudent_touch': '儉約加工',
-  'reflect': '閒靜',
-  'preparatory_touch': '坯料加工',
-  'groundwork': '坯料製作',
-  'delicate_synthesis': '精密製作',
-  'intensive_synthesis': '集中製作',
-  'advanced_touch': '上級加工',
-  'prudent_synthesis': '儉約製作',
-  'trained_finesse': '工匠的神技',
-  'careful_observation': '設計變動',
-  'heart_and_soul': '專心致志',
-  'trained_eye': '工匠的神速技',
-  'waste_not': '儉約',
-  'waste_not_2': '長期儉約',
-  'byregots_blessing': '比爾格的祝福',
-  'focused_synthesis': '注視製作',
-  'focused_touch': '注視加工',
-  'precise_touch': '集中加工',
-  'final_appraisal': '最終確認',
-  'immaculate_mend': '精修（強化）',
-  'trained_perfection': '工匠的神業',
-  'refined_touch': '精煉加工',
-  'daring_touch': '大膽加工',
-  'quick_innovation': '快速改革',
-};
+// 技能名稱一律取自 crafting-engine 的 craftActions。
+//
+// 這裡原本自帶一份對照表，已經和 crafting-engine 漂移：掌握寫成「掌控」、
+// 工匠的絕技寫成「工匠的神業」、巧奪天工寫成「精修（強化）」、冒進寫成
+//「大膽加工」。名稱表分散在多處必然漂移，所以改為單一來源。
+const ACTION_NAME_INDEX = new Map(craftActions.map((action) => [action.id, action]));
+
+function actionNameZh(action: CraftAction): string {
+  const known = ACTION_NAME_INDEX.get(action.id) ?? action;
+  return known.nameZh || known.name;
+}
 
 // 收藏品等級類型
 interface CollectabilityLevel {
@@ -174,9 +145,9 @@ function ActionIcon({ action, size = 'md' }: { action: CraftAction; size?: 'sm' 
   return (
     <div
       className={`${sizeClasses[size]} ${categoryColors[action.category] || 'bg-gray-600'} rounded flex items-center justify-center text-white font-bold`}
-      title={ACTION_NAMES[action.id] || action.name}
+      title={actionNameZh(action)}
     >
-      {(ACTION_NAMES[action.id] || action.name).charAt(0)}
+      {(actionNameZh(action)).charAt(0)}
     </div>
   );
 }
@@ -487,7 +458,7 @@ export function CraftingSimulatorV2({
                       const waitTime = action.category === 'buff' ? 2 : 3;
                       return (
                         <div key={j} className="text-gray-300">
-                          /ac {ACTION_NAMES[action.id] || action.name} &lt;wait.{waitTime}&gt;
+                          /ac {actionNameZh(action)} &lt;wait.{waitTime}&gt;
                         </div>
                       );
                     })}

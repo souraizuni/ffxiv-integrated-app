@@ -90,3 +90,35 @@ describe('專家限定技能', () => {
     expect(DEFAULT_SOLVER_OPTIONS.useQuickInnovation).toBe(false);
   });
 });
+
+describe('巨集匯出的技能名稱', () => {
+  // 起因：匯出的巨集出現 /ac "Trained Perfection"、/ac "Immaculate Mend"。
+  // 遊戲的繁中客戶端不認得英文技能名，這種巨集貼進去整段跑不動。
+  //
+  // 根因是名稱表被複製了三份（crafting-engine、macro-exporter、simulator-v2），
+  // 各自漂移：匯出用的那份只涵蓋 27 個技能，7.x 之後新增的全部落到英文 fallback；
+  // simulator-v2 那份則把掌握寫成「掌控」、工匠的絕技寫成「工匠的神業」。
+  // 現在三處統一從 craftActions 取名，這條測試釘住它不再分岔。
+
+  it('每個技能都能匯出繁中名，不會退回英文', async () => {
+    const { generateMacro } = await import('@/components/macro-exporter');
+    const macro = generateMacro(craftActions, { language: 'zh', hasLock: false });
+
+    // 只看技能名本身，不看後面的 <wait.n>
+    const names = [...macro.matchAll(/^\/ac (.+?) <wait\./gm)].map((m) => m[1]);
+    const englishFallbacks = names.filter((name) => /[A-Za-z]/.test(name));
+
+    expect(
+      englishFallbacks,
+      `這些技能沒有繁中名可用：${englishFallbacks.join('、')}`
+    ).toEqual([]);
+  });
+
+  it('匯出的每一行都對應到一個技能', async () => {
+    const { generateMacro } = await import('@/components/macro-exporter');
+    const macro = generateMacro(craftActions, { language: 'zh', hasLock: false });
+    const acLines = macro.split('\n').filter((line) => line.startsWith('/ac '));
+
+    expect(acLines).toHaveLength(craftActions.length);
+  });
+});

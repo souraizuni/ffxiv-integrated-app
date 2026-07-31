@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import type { CraftAction } from '@/types';
+import { craftActions } from '@/lib/simulator/crafting-engine';
 
 // 簡單的通知組件
 interface NotificationState {
@@ -46,67 +47,18 @@ function getActionWaitTime(actionId: string): number {
   return ACTION_WAIT_TIMES[actionId] ?? 3;
 }
 
-// 技能中文名稱對照 (參考原專案 zh-TW.ftl)
-const ACTION_NAMES_ZH: Record<string, string> = {
-  basic_synthesis: '製作',
-  careful_synthesis: '模範製作',
-  rapid_synthesis: '高速製作',
-  groundwork: '坯料製作',
-  prudent_synthesis: '儉約製作',
-  intensive_synthesis: '集中製作',
-  muscle_memory: '堅信',
-  delicate_synthesis: '精密製作',
-  basic_touch: '加工',
-  standard_touch: '中級加工',
-  advanced_touch: '上級加工',
-  hasty_touch: '倉促',
-  precise_touch: '集中加工',
-  prudent_touch: '儉約加工',
-  preparatory_touch: '坯料加工',
-  byregots_blessing: '比爾格的祝福',
-  reflect: '閒靜',
-  trained_finesse: '工匠的神技',
-  focused_touch: '注視加工',
-  masters_mend: '精修',
-  waste_not: '儉約',
-  waste_not_2: '長期儉約',
-  manipulation: '掌握',
-  innovation: '改革',
-  veneration: '崇敬',
-  great_strides: '闊步',
-  observe: '觀察',
-};
+// 技能名稱一律取自 crafting-engine 的 craftActions。
+//
+// 這裡原本另外維護一份 ACTION_NAMES_ZH，只涵蓋 27 個技能，7.x 之後新增的
+// 工匠的絕技、巧奪天工、專心致志等都不在其中，匯出的巨集會退回英文名
+//（例如 /ac "Trained Perfection"），玩家貼進遊戲就跑不動。
+// 名稱表分散在多處必然漂移，所以改為單一來源。
+const ACTION_NAME_INDEX = new Map(craftActions.map((action) => [action.id, action]));
 
-// 技能英文名稱對照（用於宏）
-const ACTION_NAMES_EN: Record<string, string> = {
-  basic_synthesis: 'Basic Synthesis',
-  careful_synthesis: 'Careful Synthesis',
-  rapid_synthesis: 'Rapid Synthesis',
-  groundwork: 'Groundwork',
-  prudent_synthesis: 'Prudent Synthesis',
-  intensive_synthesis: 'Intensive Synthesis',
-  muscle_memory: 'Muscle Memory',
-  delicate_synthesis: 'Delicate Synthesis',
-  basic_touch: 'Basic Touch',
-  standard_touch: 'Standard Touch',
-  advanced_touch: 'Advanced Touch',
-  hasty_touch: 'Hasty Touch',
-  precise_touch: 'Precise Touch',
-  prudent_touch: 'Prudent Touch',
-  preparatory_touch: 'Preparatory Touch',
-  byregots_blessing: "Byregot's Blessing",
-  reflect: 'Reflect',
-  trained_finesse: 'Trained Finesse',
-  focused_touch: 'Focused Touch',
-  masters_mend: "Master's Mend",
-  waste_not: 'Waste Not',
-  waste_not_2: 'Waste Not II',
-  manipulation: 'Manipulation',
-  innovation: 'Innovation',
-  veneration: 'Veneration',
-  great_strides: 'Great Strides',
-  observe: 'Observe',
-};
+function resolveActionName(action: CraftAction, language: 'zh' | 'en'): string {
+  const known = ACTION_NAME_INDEX.get(action.id) ?? action;
+  return language === 'zh' ? known.nameZh || known.name : known.name;
+}
 
 // 提示音選項
 const NOTIFY_SOUNDS = [
@@ -145,10 +97,8 @@ export function generateMacro(
   }
   
   // 取得技能名稱
-  const getActionName = (action: CraftAction): string => {
-    const nameMap = language === 'zh' ? ACTION_NAMES_ZH : ACTION_NAMES_EN;
-    return nameMap[action.id] || action.name;
-  };
+  const getActionName = (action: CraftAction): string =>
+    resolveActionName(action, language);
   
   // 添加技能指令
   for (const action of actions) {
@@ -199,10 +149,10 @@ export function MacroExporter({ actions, language = 'zh' }: MacroExporterProps) 
   const [showSettings, setShowSettings] = useState(false);
   
   // 取得技能名稱
-  const getActionName = useCallback((action: CraftAction): string => {
-    const nameMap = language === 'zh' ? ACTION_NAMES_ZH : ACTION_NAMES_EN;
-    return nameMap[action.id] || action.name;
-  }, [language]);
+  const getActionName = useCallback(
+    (action: CraftAction): string => resolveActionName(action, language),
+    [language]
+  );
   
   // 判斷是否需要顯示完成提示
   const hasNotify = useMemo(() => {
