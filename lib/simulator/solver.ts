@@ -113,6 +113,14 @@ export interface SolverResult {
   success: boolean;
   steps: number;
   solverUsed: 'wasm-raphael' | 'wasm-rika' | 'wasm-dfs' | 'typescript';
+  /**
+   * 有值代表這次沒能用 WASM 求解器，是退回 TypeScript 啟發式算出來的。
+   *
+   * 這件事必須讓使用者看見：TS 版只是粗略啟發式，實測會產出耐久中途歸零、
+   * 抄進遊戲直接失敗的巨集。先前它是靜默啟用的，使用者拿到壞巨集卻無從得知
+   * 是求解器降級了，只會以為求解器壞掉。
+   */
+  degradedReason?: string;
 }
 
 export interface SolverOptions {
@@ -235,7 +243,7 @@ async function wasmRaphaelSolve(
     );
     
     // 轉換動作序列為本專案格式
-    const actions = convertWasmActionsToLocal(wasmActions);
+    const { actions, unmapped } = convertWasmActionsToLocal(wasmActions);
     
     console.log('[WASM Debug] 求解動作序列:', wasmActions);
     
@@ -267,6 +275,11 @@ async function wasmRaphaelSolve(
       success: wasmFinalStatus.progress >= recipe.difficulty,
       steps: actions.length,
       solverUsed: 'wasm-raphael',
+      // 少數技能對不上本地技能表時，序列會缺步驟，結果不能當成可直接照抄的解
+      degradedReason:
+        unmapped.length > 0
+          ? `有 ${unmapped.length} 個技能無法對應到本地技能表（${unmapped.join('、')}），序列已缺少這些步驟`
+          : undefined,
     };
   } catch (error) {
     console.error('[Solver] WASM Raphael 求解失敗:', error);
@@ -296,7 +309,7 @@ async function wasmRikaSolve(
     const wasmStatus = wasmSolver.newStatus(wasmAttrs, wasmRecipe, 0);
     
     const wasmActions = wasmSolver.rikaSolve(wasmStatus);
-    const actions = convertWasmActionsToLocal(wasmActions);
+    const { actions, unmapped } = convertWasmActionsToLocal(wasmActions);
     
     // 使用 WASM 模擬來獲取正確的最終狀態
     const wasmSimResult = wasmSolver.simulate(wasmStatus, wasmActions);
@@ -314,6 +327,10 @@ async function wasmRikaSolve(
       success: wasmFinalStatus.progress >= recipe.difficulty,
       steps: actions.length,
       solverUsed: 'wasm-rika',
+      degradedReason:
+        unmapped.length > 0
+          ? `有 ${unmapped.length} 個技能無法對應到本地技能表（${unmapped.join('、')}），序列已缺少這些步驟`
+          : undefined,
     };
   } catch (error) {
     console.error('[Solver] WASM Rika 求解失敗:', error);
@@ -345,7 +362,7 @@ async function wasmDfsSolve(
     const wasmStatus = wasmSolver.newStatus(wasmAttrs, wasmRecipe, 0);
     
     const wasmActions = wasmSolver.dfsSolve(wasmStatus, depth, specialist);
-    const actions = convertWasmActionsToLocal(wasmActions);
+    const { actions, unmapped } = convertWasmActionsToLocal(wasmActions);
     
     // 使用 WASM 模擬來獲取正確的最終狀態
     const wasmSimResult = wasmSolver.simulate(wasmStatus, wasmActions);
@@ -363,6 +380,10 @@ async function wasmDfsSolve(
       success: wasmFinalStatus.progress >= recipe.difficulty,
       steps: actions.length,
       solverUsed: 'wasm-dfs',
+      degradedReason:
+        unmapped.length > 0
+          ? `有 ${unmapped.length} 個技能無法對應到本地技能表（${unmapped.join('、')}），序列已缺少這些步驟`
+          : undefined,
     };
   } catch (error) {
     console.error('[Solver] WASM DFS 求解失敗:', error);
@@ -421,20 +442,27 @@ const wasmActionIdMap: Record<string, string> = {
 /**
  * 將 WASM 動作轉換為本專案的 CraftAction
  */
-function convertWasmActionsToLocal(wasmActions: string[]): CraftAction[] {
-  return wasmActions
-    .map(wasmActionId => {
-      // 先嘗試映射
-      const localActionId = wasmActionIdMap[wasmActionId] || wasmActionId;
-      const action = craftActions.find(a => a.id === localActionId);
-      
-      if (!action) {
-        console.warn(`[Solver] 無法找到動作: WASM ID="${wasmActionId}", 映射後="${localActionId}"`);
-      }
-      
-      return action;
-    })
-    .filter((a): a is CraftAction => a !== undefined);
+function convertWasmActionsToLocal(wasmActions: string[]): {
+  actions: CraftAction[];
+  unmapped: string[];
+} {
+  const actions: CraftAction[] = [];
+  const unmapped: string[] = [];
+
+  for (const wasmActionId of wasmActions) {
+    const localActionId = wasmActionIdMap[wasmActionId] || wasmActionId;
+    const action = craftActions.find((a) => a.id === localActionId);
+
+    if (action) {
+      actions.push(action);
+    } else {
+      // 對不上的技能會從序列裡消失。這種缺步驟的巨集抄進遊戲多半是耐久中途歸零，
+      // 使用者卻只會覺得「求解器算錯了」—— 所以要回報出去，不能只印 console.warn。
+      unmapped.push(wasmActionId);
+    }
+  }
+
+  return { actions, unmapped };
 }
 
 /**
@@ -494,7 +522,7 @@ export async function raphaelSolver(
   options: RaphaelSolverOptions = {}
 ): Promise<SolverResult> {
   const { preferWasm = true } = options;
-  
+
   // 嘗試使用 WASM 求解器
   if (preferWasm && typeof window !== 'undefined') {
     const wasmResult = await wasmRaphaelSolve(recipe, crafterStats, options);
@@ -502,9 +530,19 @@ export async function raphaelSolver(
       return wasmResult;
     }
   }
-  
-  // 回退到 TypeScript 求解器
-  return typescriptSolver(recipe, crafterStats, options);
+
+  // 回退到 TypeScript 求解器。
+  // 這條路徑的產出品質遠不如 WASM，所以要標記出來讓 UI 提示使用者，
+  // 不能讓人以為拿到的是正式解。
+  const reason =
+    !preferWasm ? '已停用 WASM 求解器'
+    : typeof window === 'undefined' ? 'WASM 僅能在瀏覽器中執行'
+    : 'WASM 求解器載入或求解失敗（詳見主控台訊息）';
+
+  return {
+    ...typescriptSolver(recipe, crafterStats, options),
+    degradedReason: reason,
+  };
 }
 
 /**

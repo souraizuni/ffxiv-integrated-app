@@ -452,7 +452,22 @@ export function CraftingSimulator({
                     </span>
                   </div>
                 </div>
-                
+
+                {/* 求解器降級警告。
+                    TS 備用求解器只是粗略啟發式，會產出耐久中途歸零、抄進遊戲直接
+                    失敗的巨集。以前降級是靜默的，使用者只會覺得「求解器壞了」。 */}
+                {solverResult.degradedReason && (
+                  <div className="mb-4 p-3 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700/60 dark:bg-amber-900/20">
+                    <div className="font-medium text-amber-800 dark:text-amber-200">
+                      ⚠ 這是備用求解器的結果，不保證可行
+                    </div>
+                    <div className="mt-1 text-sm text-amber-700 dark:text-amber-300">
+                      {solverResult.degradedReason}。備用求解器算出的技能序列可能中途耐久歸零，
+                      抄進遊戲會製作失敗，請重新整理頁面再試一次。
+                    </div>
+                  </div>
+                )}
+
                 {/* 進度條顯示 */}
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   <StatusBar

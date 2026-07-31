@@ -57,6 +57,13 @@ export async function initWasm(): Promise<boolean> {
       
       // 手動載入和初始化 WASM 模組
       const response = await fetch(wasmUrl);
+
+      // 沒有這道檢查的話，404 回傳的 HTML 也會被當成 wasm 位元組送進 instantiate，
+      // 錯誤訊息會變成難以理解的 "magic word" 之類，看不出真正原因是路徑錯。
+      if (!response.ok) {
+        throw new Error(`載入 WASM 失敗：${wasmUrl} 回傳 HTTP ${response.status}`);
+      }
+
       const bytes = await response.arrayBuffer();
       
       // 建立 import object，使用 bg module 提供的 helper 函式
@@ -339,7 +346,10 @@ export function convertRecipeToWasm(
   const rlv: WasmRecipeLevel = {
     // RecipeLevelTable ID（WASM 必需）
     id: recipe.recipeLevelId || recipe.recipeLevel,
-    class_job_level: recipe.craftTypeLevel || recipe.recipeLevel,
+    // 注意：Recipe.craftTypeLevel 這個欄位名稱有誤導性，它存的是「一次製作的產出數量」
+    //（AmountResult），不是等級。先前這裡用它當 class_job_level，
+    // 對產出 1 個的配方會把配方等級傳成 1，導致求解器的等級差計算全錯。
+    class_job_level: recipe.recipeLevel,
     stars: recipe.stars || 0,
     suggested_craftsmanship: recipe.requiredCraftsmanship || 0,
     suggested_control: recipe.requiredControl || null,
@@ -357,7 +367,8 @@ export function convertRecipeToWasm(
 
   return {
     rlv,
-    job_level: recipe.craftTypeLevel || recipe.recipeLevel,
+    // 同上：這裡要的是配方的職業等級需求，不是產出數量
+    job_level: recipe.recipeLevel,
     // 這些是經過 factor 計算後的實際配方值
     difficulty: recipe.difficulty,
     quality: recipe.quality,

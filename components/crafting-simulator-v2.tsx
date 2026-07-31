@@ -338,6 +338,19 @@ export function CraftingSimulatorV2({
       {/* 技能序列區 */}
       {solverResult && (
         <div className="px-4 pb-4">
+          {/* 求解器降級警告。
+              TS 備用求解器只是粗略啟發式，會產出耐久中途歸零、抄進遊戲直接失敗的
+              巨集。以前降級是靜默的，使用者只會覺得「求解器算錯了」。 */}
+          {solverResult.degradedReason && (
+            <div className="mb-3 p-3 rounded-lg border border-amber-600/60 bg-amber-900/30">
+              <div className="font-medium text-amber-200">⚠ 這是備用求解器的結果，不保證可行</div>
+              <div className="mt-1 text-sm text-amber-300">
+                {solverResult.degradedReason}。備用求解器算出的技能序列可能中途耐久歸零，
+                抄進遊戲會製作失敗，請重新整理頁面再試一次。
+              </div>
+            </div>
+          )}
+
           {/* 技能圖標列表 */}
           <div className="flex flex-wrap gap-1 p-3 bg-gray-800 rounded-lg mb-3">
             {solverResult.actions.map((action, index) => (
