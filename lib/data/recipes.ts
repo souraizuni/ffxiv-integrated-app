@@ -200,3 +200,140 @@ export async function getRecipeDataStats(): Promise<{
     craftableItemCount: Object.keys(pack.byItem).length,
   };
 }
+
+// ---- 配方面板用的搜尋 ----
+// 回傳與 lib/recipe-datasource.ts 的 searchRecipes 相同的形狀（RecipeInfo），
+// 讓配方面板可以直接換掉資料來源而不必改型別契約。
+// 換成本地之後才有辦法依「活動」篩選 —— 那需要用配方 id 集合過濾，
+// 而 yyyy.games 的搜尋 API 不支援。
+
+import type { RecipeInfo } from '@/lib/recipe-datasource';
+import { getItem } from './items';
+import { getContentRecipeIds } from './content-tags';
+
+const CRAFT_JOB_NAMES = ['木工', '鍛造', '甲冑', '金工', '皮革', '裁縫', '鍊金', '烹調'];
+
+export interface RecipeSearchOptions {
+  /** 名稱關鍵字（比對成品的繁中／英文名稱） */
+  keyword?: string;
+  /** CraftType row id（0=木工 … 7=烹調） */
+  craftTypeId?: number;
+  levelMin?: number;
+  levelMax?: number;
+  /** 活動識別碼，例如 'cosmic'（宇宙探索） */
+  contentId?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface RecipeSearchPage {
+  results: RecipeInfo[];
+  totalPages: number;
+  totalCount: number;
+}
+
+/** 依成品 id 取得顯示用名稱（優先繁中） */
+async function resolveItemName(itemId: number): Promise<string> {
+  const item = await getItem(itemId);
+  return item?.name || `物品 #${itemId}`;
+}
+
+function toRecipeInfo(raw: RawRecipe, level: RawLevel | undefined, itemName: string): RecipeInfo {
+  return {
+    id: raw.i,
+    rlv: raw.r,
+    item_id: raw.t,
+    item_name: itemName,
+    item_amount: raw.a,
+    job: CRAFT_JOB_NAMES[raw.j] ?? '木工',
+    difficulty_factor: raw.df,
+    quality_factor: raw.qf,
+    durability_factor: raw.uf,
+    material_quality_factor: raw.mf,
+    required_craftsmanship: raw.rc,
+    required_control: raw.ro,
+    can_hq: (raw.f & FLAG_CAN_HQ) !== 0,
+  };
+}
+
+/**
+ * 搜尋配方（全部走本地資料庫，無網路往返）。
+ */
+export async function searchRecipeInfos(
+  options: RecipeSearchOptions = {}
+): Promise<RecipeSearchPage> {
+  const {
+    keyword = '',
+    craftTypeId,
+    levelMin,
+    levelMax,
+    contentId,
+    page = 1,
+    pageSize = 50,
+  } = options;
+
+  const pack = await loadRecipesPack();
+  const levels = getLevelIndex(pack);
+
+  // 活動篩選：配方 id 集合來自遊戲資料的專屬表格
+  const contentIds = contentId ? await getContentRecipeIds(contentId) : null;
+
+  const matched: RawRecipe[] = [];
+
+  for (const raw of pack.recipes) {
+    if (contentIds && !contentIds.has(raw.i)) continue;
+    if (craftTypeId !== undefined && raw.j !== craftTypeId) continue;
+
+    const level = levels.get(raw.r);
+    const classLevel = level?.l ?? 0;
+    if (levelMin !== undefined && classLevel < levelMin) continue;
+    if (levelMax !== undefined && classLevel > levelMax) continue;
+
+    matched.push(raw);
+  }
+
+  // 名稱比對需要查物品庫，放在數量收斂之後才做
+  let filtered = matched;
+
+  if (keyword.trim()) {
+    const terms = keyword.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const withNames = await Promise.all(
+      matched.map(async (raw) => ({ raw, name: await resolveItemName(raw.t) }))
+    );
+
+    filtered = withNames
+      .filter(({ raw, name }) => {
+        const haystack = `${name}`.toLowerCase();
+        return terms.every((t) => haystack.includes(t)) || String(raw.i) === keyword.trim();
+      })
+      .map(({ raw }) => raw);
+  }
+
+  // 等級由低到高，同級以配方 id 排序，結果穩定
+  filtered.sort((a, b) => {
+    const la = levels.get(a.r)?.l ?? 0;
+    const lb = levels.get(b.r)?.l ?? 0;
+    return la - lb || a.i - b.i;
+  });
+
+  const totalCount = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const start = (Math.max(1, page) - 1) * pageSize;
+  const slice = filtered.slice(start, start + pageSize);
+
+  const results = await Promise.all(
+    slice.map(async (raw) => toRecipeInfo(raw, levels.get(raw.r), await resolveItemName(raw.t)))
+  );
+
+  return { results, totalPages, totalCount };
+}
+
+/**
+ * 製作職業清單。
+ * 順序即 XIVAPI 的 CraftType sheet 順序，已由 upstream-canary 測試鎖住。
+ * 提供本地版本是為了讓配方面板在上游服務失效時仍可運作 ——
+ * 這份清單是固定的遊戲資料，沒有理由每次都上網拿。
+ */
+export function getCraftTypesLocal(): Array<{ id: number; name: string }> {
+  return CRAFT_JOB_NAMES.map((name, id) => ({ id, name }));
+}

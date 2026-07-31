@@ -14,7 +14,11 @@
     "build-data:recipes": "node scripts/build-data/build-recipes.mjs",
     "build-data:items": "node scripts/build-data/build-items.mjs",
     "build-data:sources": "node scripts/build-data/build-sources.mjs",
-    "build-data:collections": "node scripts/build-data/build-collections.mjs"
+    "build-data:collections": "node scripts/build-data/build-collections.mjs",
+    "crawl-tw-names": "node scripts/build-data/crawl-tw-names.mjs",
+    "crawl-tw-names:all": "node scripts/build-data/crawl-tw-names.mjs --all",
+    "crawl-tw-names:refresh": "node scripts/build-data/crawl-tw-names.mjs --refresh",
+    "build-data:content-tags": "node scripts/build-data/build-content-tags.mjs"
   },
   "dependencies": {
     "@types/js-cookie": "^3.0.6",

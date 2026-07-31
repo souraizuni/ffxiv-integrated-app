@@ -10,6 +10,7 @@ import { buildRecipes } from './build-recipes.mjs';
 import { buildItems } from './build-items.mjs';
 import { buildSources } from './build-sources.mjs';
 import { buildCollections } from './build-collections.mjs';
+import { buildContentTags } from './build-content-tags.mjs';
 import { isEntrypoint } from './_lib.mjs';
 
 const STEPS = {
@@ -17,6 +18,7 @@ const STEPS = {
   items: buildItems,
   sources: buildSources,
   collections: buildCollections,
+  contentTags: buildContentTags,
 };
 
 async function main() {

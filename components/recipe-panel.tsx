@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { searchRecipes, getCraftTypeList, type RecipeInfo, type CraftType } from '@/lib/recipe-datasource';
+import { type RecipeInfo, type CraftType } from '@/lib/recipe-datasource';
+import { searchRecipeInfos, getCraftTypesLocal } from '@/lib/data/recipes';
+import { getContentTags, type ContentTag } from '@/lib/data/content-tags';
 
 // 等級區間選項
 const LEVEL_RANGES = [
@@ -25,10 +27,13 @@ interface RecipePanelProps {
 
 export function RecipePanel({ onSelect, selectedRecipeId }: RecipePanelProps) {
   // 篩選條件
-  const [craftTypes, setCraftTypes] = useState<CraftType[]>([]);
   const [selectedCraftType, setSelectedCraftType] = useState<number | undefined>();
   const [selectedLevelRange, setSelectedLevelRange] = useState<typeof LEVEL_RANGES[0]>(LEVEL_RANGES[0]);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // 活動篩選：整份配方庫有一萬多個配方，跑特定活動時只想看該活動的那幾百個
+  const [contentTags, setContentTags] = useState<ContentTag[]>([]);
+  const [selectedContent, setSelectedContent] = useState<string | undefined>();
   
   // 配方列表
   const [recipes, setRecipes] = useState<RecipeInfo[]>([]);
@@ -36,17 +41,18 @@ export function RecipePanel({ onSelect, selectedRecipeId }: RecipePanelProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
-  // 載入職業列表
+  // 職業列表是固定的遊戲資料，直接用本地版本。
+  // 先前每次掛載都向 yyyy.games 取，上游失效時整個職業選單就空了。
+  const [craftTypes] = useState<CraftType[]>(() => getCraftTypesLocal());
+
   useEffect(() => {
-    getCraftTypeList()
-      .then(setCraftTypes)
-      .catch(console.error);
+    getContentTags().then(setContentTags).catch(console.error);
   }, []);
 
   // 查詢配方（自動觸發）
   const fetchRecipes = useCallback(async (page: number = 1) => {
-    // 必須選擇職業或有搜尋關鍵字
-    if (!selectedCraftType && !searchQuery) {
+    // 選了活動時本身就已經收斂到幾百個，不必再要求選職業或關鍵字
+    if (!selectedCraftType && !searchQuery && !selectedContent) {
       setRecipes([]);
       setTotalPages(1);
       return;
@@ -54,13 +60,15 @@ export function RecipePanel({ onSelect, selectedRecipeId }: RecipePanelProps) {
 
     setIsLoading(true);
     try {
-      const result = await searchRecipes(
-        searchQuery,
+      // 走本地配方庫：沒有網路往返，也才有辦法依配方 id 集合做活動篩選
+      const result = await searchRecipeInfos({
+        keyword: searchQuery,
+        craftTypeId: selectedCraftType,
+        levelMin: selectedLevelRange.min,
+        levelMax: selectedLevelRange.max,
+        contentId: selectedContent,
         page,
-        selectedCraftType,
-        selectedLevelRange.min,
-        selectedLevelRange.max
-      );
+      });
       setRecipes(result.results);
       setTotalPages(result.totalPages);
       setCurrentPage(page);
@@ -70,7 +78,7 @@ export function RecipePanel({ onSelect, selectedRecipeId }: RecipePanelProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedCraftType, selectedLevelRange, searchQuery]);
+  }, [selectedCraftType, selectedLevelRange, searchQuery, selectedContent]);
 
   // 當篩選條件變化時重新載入
   useEffect(() => {
@@ -113,6 +121,35 @@ export function RecipePanel({ onSelect, selectedRecipeId }: RecipePanelProps) {
             className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
           />
         </div>
+
+        {/* 活動篩選：一鍵收斂到該活動的配方，不必在一萬多個裡翻 */}
+        {contentTags.length > 0 && (
+          <div>
+            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
+              活動
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {contentTags.map((tag) => {
+                const active = selectedContent === tag.id;
+                return (
+                  <button
+                    key={tag.id}
+                    onClick={() => setSelectedContent(active ? undefined : tag.id)}
+                    className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                      active
+                        ? 'bg-violet-500 border-violet-500 text-white'
+                        : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-violet-400'
+                    }`}
+                    title={`${tag.label}：${tag.recipeCount} 個配方`}
+                  >
+                    {tag.label}
+                    <span className="ml-1 opacity-60">{tag.recipeCount}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* 職業選擇 */}
         <div>

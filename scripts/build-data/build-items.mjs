@@ -43,10 +43,23 @@ export async function buildItems() {
 
   const version = await getGameVersion();
 
-  // 繁中名稱來自既有的 tw-items.json（teamcraft 翻譯資料）
+  // 繁中名稱有兩個來源，自建者優先：
+  //   1. data/tw-items.json —— teamcraft 翻譯資料，涵蓋廣但最大 item id 只到 45590，
+  //      7.x 之後的物品（宇宙探索 48xxx 等）完全沒有。
+  //   2. data/tw-names.json —— 本專案自建、由 crawl-tw-names.mjs 慢慢爬回來的資料庫。
+  //      這是我們自己的資產：即使上游停止服務，已取得的名稱仍然可用。
   const twRaw = await readFile(resolve(ROOT, 'data/tw-items.json'), 'utf8');
   const twItems = JSON.parse(twRaw);
-  process.stdout.write(`  繁中名稱 ${Object.keys(twItems).length} 筆\n`);
+  process.stdout.write(`  繁中名稱（teamcraft）${Object.keys(twItems).length} 筆\n`);
+
+  let ownNames = {};
+  try {
+    const ownRaw = await readFile(resolve(ROOT, 'data/tw-names.json'), 'utf8');
+    ownNames = JSON.parse(ownRaw).names || {};
+    process.stdout.write(`  繁中名稱（自建）${Object.keys(ownNames).length} 筆\n`);
+  } catch {
+    process.stdout.write('  繁中名稱（自建）尚未建立，可執行 npm run crawl-tw-names 補齊\n');
+  }
 
   // 可在市場交易的物品清單（市場頁用來過濾）
   let marketable = new Set();
@@ -70,7 +83,8 @@ export async function buildItems() {
   for (const row of rows) {
     const f = row.fields || {};
     const nameEn = f.Name || '';
-    const nameTw = twItems[String(row.row_id)]?.tw || '';
+    // 自建資料庫優先：它比 teamcraft 那份新，且是我們自己維護的
+    const nameTw = ownNames[String(row.row_id)] || twItems[String(row.row_id)]?.tw || '';
 
     // 兩種語言都沒名字的列是空列，沒有保留價值
     if (!nameEn && !nameTw) continue;

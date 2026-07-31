@@ -6,10 +6,11 @@ import { ItemSourceBadges, ItemSourceInfoPanel } from '@/components/item-source-
 import { CraftingSimulator } from '@/components/crafting-simulator';
 import { fetchRecipe } from '@/hooks/use-xivapi';
 import { getItem } from '@/lib/data/items';
+import { getRecipeById } from '@/lib/data/recipes';
 import { useIsDesktop } from '@/hooks/use-media-query';
 import { buildMaterialTree, flattenMaterialTree } from '@/lib/recipe-tree';
 import { useGearsets, JOB_NAMES } from '@/hooks/use-gearsets';
-import { convertToRecipe, type RecipeInfo } from '@/lib/recipe-datasource';
+import { type RecipeInfo } from '@/lib/recipe-datasource';
 import type { MaterialTreeNode, CrafterStats, Recipe, CraftJob, FlattenedMaterial } from '@/types';
 
 // 預設製作者屬性
@@ -163,11 +164,18 @@ export default function CraftingPage() {
     });
     
     try {
-      // 並行執行：轉換配方和獲取物品詳細資訊（含正確的圖示）
+      // 全部走本地資料庫。先前 convertToRecipe 會對 yyyy.games 發三次請求
+      //（等級表、材料、收藏品門檻），選一個配方就要等一兩秒。
       const [fullRecipe, localItem] = await Promise.all([
-        convertToRecipe(recipeInfo),
+        getRecipeById(recipeInfo.id),
         getItem(recipeInfo.item_id).catch(() => null),
       ]);
+
+      if (!fullRecipe) {
+        console.error('本地配方庫查無此配方:', recipeInfo.id);
+        return;
+      }
+
       
       setRecipe(fullRecipe);
       
