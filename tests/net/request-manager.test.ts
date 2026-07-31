@@ -264,19 +264,66 @@ describe('fetchTaxRatesForWorlds', () => {
     }
   });
 
-  it('稅率 0% 要被視為有效值而非缺值', async () => {
-    // 實測「拉姆」全城市 0%，若用 truthy 判斷會整列消失
-    const original = globalThis.fetch;
-    globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ Gridania: 0, Ishgard: 0 }), {
+  // 0% 是合法稅率：由大國防聯軍戰績決定、每週更新，人數夠低時真的會出現，
+  // 而那恰好是最值得推薦的上架地點。已關閉的伺服器雖然也回 0%，
+  // 但必須靠市場活動（lastUploadTime）區分，不能拿稅率本身當判斷依據。
+  function mockTaxAndBoard(rates: object, lastUploadTime: number) {
+    return (async (url: string | URL | Request) => {
+      const href = String(url);
+      const body = href.includes('tax-rates') ? rates : { itemID: 5057, lastUploadTime, listings: [] };
+      return new Response(JSON.stringify(body), {
         status: 200,
         headers: { 'content-type': 'application/json' },
-      })) as typeof fetch;
+      });
+    }) as typeof fetch;
+  }
+
+  it('0% 且仍有市場活動：視為真正的免稅，予以推薦', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = mockTaxAndBoard({ Gridania: 0, Ishgard: 0 }, Date.now());
 
     try {
-      const [entry] = await fetchTaxRatesForWorlds(['ZERO']);
+      const [entry] = await fetchTaxRatesForWorlds(['REAL_ZERO']);
+      expect(entry.inactive).toBeUndefined();
       expect(entry.lowest).toEqual({ city: 'Gridania', rate: 0 });
-      expect(entry.rates.Ishgard).toBe(0);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('0% 但已無市場活動：視為已關閉，不予推薦', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = mockTaxAndBoard({ Gridania: 0, Ishgard: 0 }, 0);
+
+    try {
+      const [entry] = await fetchTaxRatesForWorlds(['CLOSED']);
+      expect(entry.inactive).toBe(true);
+      expect(entry.lowest).toBeNull();
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('非 0% 的世界不做額外探測，也不會被誤判', async () => {
+    const original = globalThis.fetch;
+    let boardCalls = 0;
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const href = String(url);
+      if (!href.includes('tax-rates')) boardCalls++;
+      const body = href.includes('tax-rates')
+        ? { Gridania: 5, Ishgard: 3, Kugane: 5 }
+        : { itemID: 5057, lastUploadTime: 0, listings: [] };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const [entry] = await fetchTaxRatesForWorlds(['NORMAL']);
+      expect(entry.inactive).toBeUndefined();
+      expect(entry.lowest).toEqual({ city: 'Ishgard', rate: 3 });
+      expect(boardCalls, '沒有 0% 就不該多打探測請求').toBe(0);
     } finally {
       globalThis.fetch = original;
     }

@@ -11,10 +11,12 @@ import {
 // ============================================
 // 市場稅率一覽
 // ============================================
-// 為什麼要做成「整個資料中心 × 所有城市」的矩陣，而不是只顯示目前伺服器：
-// 各世界稅率不同，同一世界內各城市也不同（實測繁中服有 0% 到 5% 的差距）。
-// 要決定「該去哪上架」就必須整張表一起看。稅率會隨大國防聯軍戰績週期變動，
-// 所以這是一份需要即時查詢、不能寫死的資料。
+// 用途：稅率只影響「賣出時被抽多少」，買東西的價格不受影響。
+// 因此這張表要回答的問題是「我該把東西掛到哪個城市」——
+// 雇員綁在自己的世界上，所以主要看的是自己世界那一列的城市差異；
+// 跨世界的比較只是次要參考（例如評估轉移或分身）。
+//
+// 稅率會隨大國防聯軍戰績週期變動，必須即時查詢，不能寫死。
 
 interface TaxRatesPanelProps {
   /** 資料中心名稱，僅作標題顯示 */
@@ -53,8 +55,12 @@ export function TaxRatesPanel({ dataCenter, worlds, currentWorld }: TaxRatesPane
     // 城市欄位以實際回傳的 key 為準，不寫死順序
     const cities = [...new Set(data.flatMap((w) => Object.keys(w.rates)))];
 
+    // 已無市場活動的世界（關閉的伺服器）不參與比較，否則會建議使用者去一個賣不掉東西的地方。
+    // 注意 0% 本身是合法稅率，不能拿來當判斷依據 —— 這裡靠的是市場活動探測結果。
+    const usable = data.filter((w) => !w.inactive && !w.error);
+
     let globalMin = Number.POSITIVE_INFINITY;
-    for (const w of data) {
+    for (const w of usable) {
       for (const city of cities) {
         const rate = w.rates[city];
         // 稅率可能是 0，必須用 typeof 而非 truthy 判斷
@@ -62,17 +68,23 @@ export function TaxRatesPanel({ dataCenter, worlds, currentWorld }: TaxRatesPane
       }
     }
 
-    const best = data
+    // 主要結論：使用者自己世界裡最便宜的上架城市（雇員綁在自己的世界）
+    const mine = currentWorld ? usable.find((w) => w.world === currentWorld) : undefined;
+
+    // 次要參考：整個資料中心最低的世界
+    const bestAcrossDc = [...usable]
       .filter((w) => w.lowest !== null)
       .sort((a, b) => a.lowest!.rate - b.lowest!.rate)[0];
 
     return {
       cities,
       globalMin: Number.isFinite(globalMin) ? globalMin : null,
-      best: best ?? null,
+      mine: mine ?? null,
+      bestAcrossDc: bestAcrossDc ?? null,
       failed: data.filter((w) => w.error).map((w) => w.world),
+      inactive: data.filter((w) => w.inactive).map((w) => w.world),
     };
-  }, [data]);
+  }, [data, currentWorld]);
 
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded-lg">
@@ -103,25 +115,40 @@ export function TaxRatesPanel({ dataCenter, worlds, currentWorld }: TaxRatesPane
             </div>
           ) : !data || !analysis ? null : (
             <>
-              {/* 結論先講：最划算的上架地點 */}
-              {analysis.best?.lowest && (
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  最低稅率：
-                  <b className="text-emerald-600 dark:text-emerald-400 mx-1">
-                    {analysis.best.world}
-                  </b>
-                  的
-                  <b className="text-emerald-600 dark:text-emerald-400 mx-1">
-                    {TAX_CITY_NAMES[analysis.best.lowest.city] || analysis.best.lowest.city}
-                  </b>
-                  <b className="text-emerald-600 dark:text-emerald-400">
-                    {analysis.best.lowest.rate}%
-                  </b>
-                  <span className="text-xs text-gray-400 ml-2">
-                    （稅率隨大國防聯軍戰績週期變動，出售前建議重查）
-                  </span>
+              {/* 結論先講：你該把東西掛到哪個城市 */}
+              <div className="space-y-1">
+                {analysis.mine?.lowest ? (
+                  <p className="text-sm text-gray-700 dark:text-gray-300">
+                    在
+                    <b className="mx-1">{analysis.mine.world}</b>
+                    上架，稅率最低的城市是
+                    <b className="text-emerald-600 dark:text-emerald-400 mx-1">
+                      {TAX_CITY_NAMES[analysis.mine.lowest.city] || analysis.mine.lowest.city}
+                    </b>
+                    <b className="text-emerald-600 dark:text-emerald-400">
+                      {analysis.mine.lowest.rate}%
+                    </b>
+                  </p>
+                ) : (
+                  <p className="text-sm text-gray-500">請先選擇你所在的伺服器</p>
+                )}
+
+                {analysis.bestAcrossDc?.lowest &&
+                  analysis.bestAcrossDc.world !== analysis.mine?.world && (
+                    <p className="text-xs text-gray-500">
+                      本資料中心最低為 {analysis.bestAcrossDc.world} 的
+                      {TAX_CITY_NAMES[analysis.bestAcrossDc.lowest.city] ||
+                        analysis.bestAcrossDc.lowest.city}{' '}
+                      {analysis.bestAcrossDc.lowest.rate}%
+                      　（僅供參考：雇員綁在自己的世界，無法直接到別的世界上架）
+                    </p>
+                  )}
+
+                <p className="text-xs text-gray-400">
+                  稅率只影響賣出時被抽的比例，購買價格不受影響；
+                  數值隨大國防聯軍戰績週期變動，出售前建議重查。
                 </p>
-              )}
+              </div>
 
               <div className="overflow-x-auto">
                 <table className="w-full text-xs border-collapse min-w-[560px]">
@@ -157,6 +184,13 @@ export function TaxRatesPanel({ dataCenter, worlds, currentWorld }: TaxRatesPane
               {analysis.failed.length > 0 && (
                 <p className="text-xs text-amber-600 dark:text-amber-400">
                   以下伺服器查詢失敗，未列入比較：{analysis.failed.join('、')}
+                </p>
+              )}
+
+              {analysis.inactive.length > 0 && (
+                <p className="text-xs text-gray-400">
+                  以下伺服器已無市場活動（多半已關閉），未列入比較：
+                  {analysis.inactive.join('、')}
                 </p>
               )}
 

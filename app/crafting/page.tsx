@@ -9,7 +9,7 @@ import { getItem } from '@/lib/data/items';
 import { useIsDesktop } from '@/hooks/use-media-query';
 import { buildMaterialTree, flattenMaterialTree } from '@/lib/recipe-tree';
 import { useGearsets, JOB_NAMES } from '@/hooks/use-gearsets';
-import { convertToRecipe, getRecipeByItemId, type RecipeInfo } from '@/lib/recipe-datasource';
+import { convertToRecipe, type RecipeInfo } from '@/lib/recipe-datasource';
 import type { MaterialTreeNode, CrafterStats, Recipe, CraftJob, FlattenedMaterial } from '@/types';
 
 // 預設製作者屬性
@@ -115,8 +115,8 @@ export default function CraftingPage() {
         iconUrl: '',
       });
 
-      // 取得配方
-      const fullRecipe = await getRecipeByItemId(itemId);
+      // 取得配方（本地資料庫優先，不走網路）
+      const fullRecipe = await fetchRecipe(itemId);
       if (fullRecipe) {
         setRecipe(fullRecipe);
         setCurrentJob(fullRecipe.craftType);

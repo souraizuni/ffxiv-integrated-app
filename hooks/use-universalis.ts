@@ -637,9 +637,33 @@ export function netAfterTax(price: number, taxRatePercent: number): number {
 export interface WorldTaxRates {
   world: string;
   rates: TaxRates;
-  /** 該世界最低的城市稅率；查詢失敗時為 null */
+  /** 該世界最低的城市稅率；查詢失敗或無資料時為 null */
   lowest: { city: string; rate: number } | null;
+  /** 該世界已無市場活動（多半是已關閉的伺服器，例如拉姆） */
+  inactive?: boolean;
   error?: string;
+}
+
+// 探測世界是否仍有市場活動時使用的物品。
+// 黑鐵錠是各版本都在流通的基礎素材，活躍的世界必定有上傳紀錄。
+const ACTIVITY_PROBE_ITEM_ID = 5057;
+
+/**
+ * 判斷某個世界是否還有市場活動。
+ *
+ * 不能用「稅率全為 0%」來判斷 —— 0% 是合法值：稅率由大國防聯軍戰績決定、
+ * 每週更新，人數夠低時真的會出現 0%，而那恰好是最值得推薦的上架地點。
+ * 已關閉的伺服器（如拉姆）雖然也回傳 0%，但兩者必須用不同訊號區分：
+ * 真正的差異在於市場看板的 lastUploadTime —— 關閉的伺服器不會有任何上傳紀錄。
+ */
+async function hasMarketActivity(world: string, signal?: AbortSignal): Promise<boolean> {
+  try {
+    const board = await fetchItemMarketBoard(world, ACTIVITY_PROBE_ITEM_ID, signal);
+    return board.lastUploadTime > 0;
+  } catch {
+    // 探測失敗時不武斷判定為關閉，寧可照常顯示
+    return true;
+  }
 }
 
 /**
@@ -657,7 +681,19 @@ export async function fetchTaxRatesForWorlds(
     worlds.map(async (world) => {
       try {
         const rates = await fetchTaxRates(world, signal);
-        return { world, rates, lowest: lowestTaxRate(rates) };
+        const lowest = lowestTaxRate(rates);
+
+        // 只有在出現 0% 時才需要進一步確認 ——
+        // 0% 可能是真的免稅（值得推薦），也可能是伺服器已關閉（不該推薦）。
+        // 其餘情況不必多打一次請求。
+        if (lowest?.rate === 0) {
+          const active = await hasMarketActivity(world, signal);
+          if (!active) {
+            return { world, rates, lowest: null, inactive: true };
+          }
+        }
+
+        return { world, rates, lowest };
       } catch (error) {
         // 單一世界失敗不該讓整張表消失
         return {

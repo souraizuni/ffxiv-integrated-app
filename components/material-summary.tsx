@@ -7,8 +7,10 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import type { CraftingListItem } from '@/hooks/use-crafting-lists';
 import type { Recipe, FlattenedMaterial, Item } from '@/types';
-import { getRecipeByItemId } from '@/lib/recipe-datasource';
-import { fetchItem } from '@/hooks/use-xivapi';
+// 配方查詢走 fetchRecipe（本地 msgpack 優先、資料檔載入失敗才回退線上），
+// 而非直接打 yyyy.games。清單有 N 個成品、每個再遞歸展開材料時，
+// 原本的寫法會產生數十到上百次網路請求，每次 0.5–1.4 秒。
+import { fetchRecipe, fetchItem } from '@/hooks/use-xivapi';
 import { ServerSelector, useServerConfig } from './server-selector';
 import {
   calculateSmartCost,
@@ -198,7 +200,7 @@ export function MaterialSummary({ items, listId, onClose }: MaterialSummaryProps
           continue;
         }
         
-        const recipe = await getRecipeByItemId(listItem.itemId);
+        const recipe = await fetchRecipe(listItem.itemId);
         
         if (!recipe) {
           // 無配方，可能不是製作品
@@ -1087,7 +1089,7 @@ async function calculateItemMaterials(
     const requiredAmount = ingredient.amount * craftCount;
     
     // 嘗試獲取此材料的配方
-    const ingredientRecipe = await getRecipeByItemId(ingredient.itemId);
+    const ingredientRecipe = await fetchRecipe(ingredient.itemId);
     const isBaseMaterial = !ingredientRecipe;
 
     // 獲取材料名稱和圖示（從 API 取得正確的圖示 URL）
