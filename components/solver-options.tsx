@@ -214,45 +214,35 @@ export function SolverSettings({
       {/* 技能開關 */}
       <div className="space-y-2">
         <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          使用技能
+          可用技能
         </label>
-        <div className="grid grid-cols-2 gap-2">
-          <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-            <input
-              type="checkbox"
-              checked={options.useManipulation ?? true}
-              onChange={(e) => updateOption('useManipulation', e.target.checked)}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            掌握
-          </label>
-          <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-            <input
-              type="checkbox"
-              checked={options.useHeartAndSoul ?? false}
-              onChange={(e) => updateOption('useHeartAndSoul', e.target.checked)}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            專心致志
-          </label>
-          <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-            <input
-              type="checkbox"
-              checked={options.useQuickInnovation ?? false}
-              onChange={(e) => updateOption('useQuickInnovation', e.target.checked)}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            快速改革
-          </label>
-          <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-            <input
-              type="checkbox"
-              checked={options.useTrainedEye ?? false}
-              onChange={(e) => updateOption('useTrainedEye', e.target.checked)}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            工匠的神速技巧
-          </label>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          取消勾選代表你目前沒有該技能，求解器就不會用它。
+          同時標出英文原名，翻譯有疑慮時可據此對照遊戲內名稱。
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {SOLVER_ACTION_TOGGLES.map((toggle) => (
+            <label
+              key={toggle.key}
+              className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400"
+              title={toggle.note}
+            >
+              <input
+                type="checkbox"
+                checked={options[toggle.key] ?? toggle.defaultOn}
+                onChange={(e) => updateOption(toggle.key, e.target.checked)}
+                className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span className="min-w-0">
+                <span className="block truncate">{toggle.nameZh}</span>
+                <span className="block text-xs text-gray-400 truncate">
+                  {toggle.nameEn}
+                  {toggle.level ? ` · Lv${toggle.level}` : ''}
+                  {toggle.specialist ? ' · 需專家' : ''}
+                </span>
+              </span>
+            </label>
+          ))}
         </div>
       </div>
 
@@ -290,6 +280,69 @@ export function SolverSettings({
 // 完整求解器選項面板
 // ============================================
 
+// 求解器實際支援開關的技能。
+// WASM 的 raphael_solve 只接受這四個旗標；其餘技能由玩家等級決定，
+// 不在這裡列出以免給出「取消勾選就會生效」的假承諾。
+const SOLVER_ACTION_TOGGLES: Array<{
+  key: 'useManipulation' | 'useHeartAndSoul' | 'useQuickInnovation' | 'useTrainedEye';
+  nameZh: string;
+  nameEn: string;
+  level?: number;
+  specialist?: boolean;
+  defaultOn: boolean;
+  note: string;
+}> = [
+  {
+    key: 'useManipulation',
+    nameZh: '掌握',
+    nameEn: 'Manipulation',
+    level: 65,
+    defaultOn: true,
+    note: '每回合恢復耐久度',
+  },
+  {
+    key: 'useHeartAndSoul',
+    nameZh: '專心致志',
+    nameEn: 'Heart and Soul',
+    level: 86,
+    specialist: true,
+    defaultOn: false,
+    note: '需裝備「專家之證」才能使用，因此預設關閉',
+  },
+  {
+    key: 'useQuickInnovation',
+    nameZh: '快速改革',
+    nameEn: 'Quick Innovation',
+    level: 96,
+    specialist: true,
+    defaultOn: false,
+    note: '需裝備「專家之證」才能使用，因此預設關閉',
+  },
+  {
+    key: 'useTrainedEye',
+    nameZh: '工匠的神速技巧',
+    nameEn: 'Trained Eye',
+    level: 80,
+    defaultOn: false,
+    note: '僅適用於等級比自己低 10 級以上的配方',
+  },
+];
+
+/**
+ * 求解器選項預設值。
+ *
+ * 一心不亂與快速改革預設關閉：兩者都需要裝備能工巧匠之魂（專家），
+ * 而同時只能有三個製作職業是專家。預設開啟會讓求解器產出玩家做不出來的手法。
+ */
+export const DEFAULT_SOLVER_OPTIONS: RaphaelSolverOptions = {
+  useManipulation: true,
+  useHeartAndSoul: false,
+  useQuickInnovation: false,
+  useTrainedEye: false,
+  backloadProgress: false,
+  adversarial: false,
+};
+
 export function SolverOptionsPanel({
   recipe,
   crafterStats,
@@ -303,12 +356,7 @@ export function SolverOptionsPanel({
   const [medicine, setMedicine] = useState<Enhancer | undefined>();
   const [initialQuality, setInitialQuality] = useState(0);
   const [solverOptions, setSolverOptions] = useState<RaphaelSolverOptions>({
-    useManipulation: true,
-    useHeartAndSoul: false,
-    useQuickInnovation: false,
-    useTrainedEye: false,
-    backloadProgress: false,
-    adversarial: false,
+    ...DEFAULT_SOLVER_OPTIONS,
   });
 
   // 計算增強後的屬性

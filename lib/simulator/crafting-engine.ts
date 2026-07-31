@@ -669,6 +669,16 @@ export function simulateCrafting(
 }
 
 // ---- 所有生產技能定義 ----
+// 技能的繁中名稱以遊戲內技能選單為準（使用者提供的 100 級烹調師截圖），
+// 並用「等級 + CP」交叉驗證每一條對應關係。
+// 修正過的誤植：
+//   Heart and Soul      「能工巧匠圖紙」（那是專家之證的物品名）→ 專心致志
+//   Trained Perfection  「一心不亂」（日文名，非繁中譯名）      → 工匠的絕技
+//   Immaculate Mend     「完美精修」                          → 巧奪天工
+//   Careful Observation 「設計變更」                          → 設計變動
+//   Refined Touch       「加工精密化」                        → 精煉加工
+//   Daring Touch        「大膽加工」                          → 冒進
+// 其中 Trained Perfection 被貼上專家技能的名字，是使用者回報「求解器用了我沒有的技能」的直接原因。
 export const craftActions: CraftAction[] = [
   // ===== 進度技能 =====
   {
@@ -885,7 +895,7 @@ export const craftActions: CraftAction[] = [
   {
     id: 'refined_touch',
     name: 'Refined Touch',
-    nameZh: '加工精密化',
+    nameZh: '精煉加工',
     cpCost: 24,
     durabilityCost: 10,
     successRate: 100,
@@ -896,7 +906,7 @@ export const craftActions: CraftAction[] = [
   {
     id: 'daring_touch',
     name: 'Daring Touch',
-    nameZh: '大膽加工',
+    nameZh: '冒進',
     cpCost: 0,
     durabilityCost: 10,
     successRate: 60,
@@ -1032,7 +1042,7 @@ export const craftActions: CraftAction[] = [
   {
     id: 'heart_and_soul',
     name: 'Heart and Soul',
-    nameZh: '能工巧匠圖紙',
+    nameZh: '專心致志',
     cpCost: 0,
     durabilityCost: 0,
     successRate: 100,
@@ -1043,7 +1053,7 @@ export const craftActions: CraftAction[] = [
   {
     id: 'careful_observation',
     name: 'Careful Observation',
-    nameZh: '設計變更',
+    nameZh: '設計變動',
     cpCost: 0,
     durabilityCost: 0,
     successRate: 100,
@@ -1065,7 +1075,7 @@ export const craftActions: CraftAction[] = [
   {
     id: 'trained_perfection',
     name: 'Trained Perfection',
-    nameZh: '一心不亂',
+    nameZh: '工匠的絕技',
     cpCost: 0,
     durabilityCost: 0,
     successRate: 100,
@@ -1076,7 +1086,7 @@ export const craftActions: CraftAction[] = [
   {
     id: 'immaculate_mend',
     name: 'Immaculate Mend',
-    nameZh: '完美精修',
+    nameZh: '巧奪天工',
     cpCost: 112,
     durabilityCost: 0,
     successRate: 100,
